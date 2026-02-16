@@ -90,3 +90,42 @@ class TestHealthEndpoint:
         resp = await client.get("/health")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
+
+
+class TestAuth:
+    @pytest.mark.asyncio
+    async def test_401_when_key_required_and_missing(self, client):
+        with patch("app.auth.settings") as mock_settings:
+            mock_settings.kernel_api_key = "secret-key"
+            resp = await client.get("/kernel/presets")
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_401_when_key_wrong(self, client):
+        with patch("app.auth.settings") as mock_settings:
+            mock_settings.kernel_api_key = "secret-key"
+            resp = await client.get(
+                "/kernel/presets",
+                headers={"X-API-Key": "wrong-key"},
+            )
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_200_when_key_valid(self, client):
+        with patch("app.auth.settings") as mock_settings:
+            mock_settings.kernel_api_key = "secret-key"
+            resp = await client.get(
+                "/kernel/presets",
+                headers={"X-API-Key": "secret-key"},
+            )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_200_when_bearer_valid(self, client):
+        with patch("app.auth.settings") as mock_settings:
+            mock_settings.kernel_api_key = "secret-key"
+            resp = await client.get(
+                "/kernel/presets",
+                headers={"Authorization": "Bearer secret-key"},
+            )
+        assert resp.status_code == 200

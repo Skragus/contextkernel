@@ -73,8 +73,16 @@ tests/
 - No DB migrations, no caching, no ML.
 - `RECORD_TYPE_CONFIG` maps known types; `DEFAULT_CONFIG` handles unknowns via first-numeric heuristic.
 
+## Auth (optional)
+
+Set `KERNEL_API_KEY` to require API key auth on all kernel endpoints. When set, clients must pass:
+- `X-API-Key: <key>`, or
+- `Authorization: Bearer <key>`
+
+When not set, kernel endpoints are unauthenticated.
+
 ## Deploy (Railway)
 
 1. Create new Railway service pointing to this repo
 2. Set `DATABASE_URL` to the existing Postgres
-3. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+3. (Optional) Set `KERNEL_API_KEY` for auth

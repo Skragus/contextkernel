@@ -7,6 +7,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import verify_api_key
 from app.config import settings
 from app.db import get_session
 from app.kernel import builders
@@ -39,6 +40,7 @@ def _parse_date(value: str, name: str) -> date:
 async def get_card(
     card_type: str,
     session: AsyncSession = Depends(get_session),
+    _: str = Depends(verify_api_key),
     from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
     tz: str = Query(default=None, description="Timezone (e.g. US/Eastern)"),
@@ -68,7 +70,9 @@ async def get_card(
 
 
 @router.get("/presets")
-async def presets_list() -> list[dict]:
+async def presets_list(
+    _: str = Depends(verify_api_key),
+) -> list[dict]:
     return [
         {"id": p.id, "label": p.label, "description": p.description, "card_types": p.card_types}
         for p in list_presets()
@@ -76,7 +80,10 @@ async def presets_list() -> list[dict]:
 
 
 @router.get("/presets/{preset_id}")
-async def preset_detail(preset_id: str) -> dict:
+async def preset_detail(
+    preset_id: str,
+    _: str = Depends(verify_api_key),
+) -> dict:
     preset = get_preset(preset_id)
     if preset is None:
         raise HTTPException(status_code=404, detail=f"Unknown preset: {preset_id}")
@@ -92,6 +99,7 @@ async def preset_detail(preset_id: str) -> dict:
 async def preset_run(
     preset_id: str,
     session: AsyncSession = Depends(get_session),
+    _: str = Depends(verify_api_key),
     from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
     tz: str = Query(default=None, description="Timezone"),
