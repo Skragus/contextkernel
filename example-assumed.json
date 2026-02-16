@@ -1,0 +1,93 @@
+{
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "device_id": "samsung-sm-s901b-001",
+    "date": "2026-02-16",
+    "collected_at": "2026-02-16T23:59:00+00:00",
+    "received_at": "2026-02-16T23:59:45+00:00",
+    "steps_total": 8432,
+    "body_metrics": {
+      "weight_kg": 78.5,
+      "height_m": 1.82,
+      "bmi": 23.7,
+      "body_fat_percentage": 18.2,
+      "measurements": [
+        {
+          "type": "weight",
+          "value": 78.5,
+          "unit": "kg",
+          "timestamp": "2026-02-16T07:30:00+00:00",
+          "source": "smart_scale"
+        }
+      ]
+    },
+    "nutrition_summary": {
+      "calories_consumed": 2450,
+      "calories_burned": 2800,
+      "protein_g": 145,
+      "carbs_g": 280,
+      "fat_g": 85,
+      "water_ml": 2100,
+      "meals_logged": 4
+    },
+    "heart_rate_summary": {
+      "avg_bpm": 72,
+      "resting_bpm": 58,
+      "max_bpm": 165,
+      "min_bpm": 52,
+      "readings_count": 48,
+      "zones": {
+        "fat_burn": { "minutes": 45, "calories": 320 },
+        "cardio": { "minutes": 22, "calories": 280 },
+        "peak": { "minutes": 8, "calories": 150 }
+      }
+    },
+    "sleep_sessions": [
+      {
+        "start_time": "2026-02-15T23:15:00+00:00",
+        "end_time": "2026-02-16T06:45:00+00:00",
+        "duration_minutes": 450,
+        "efficiency": 88,
+        "stages": {
+          "awake_minutes": 35,
+          "light_minutes": 210,
+          "deep_minutes": 125,
+          "rem_minutes": 80
+        },
+        "source": "samsung_health"
+      }
+    ],
+    "exercise_sessions": [
+      {
+        "type": "running",
+        "start_time": "2026-02-16T17:30:00+00:00",
+        "end_time": "2026-02-16T18:15:00+00:00",
+        "duration_minutes": 45,
+        "distance_m": 5200,
+        "calories_burned": 420,
+        "avg_heart_rate": 155,
+        "max_heart_rate": 165,
+        "steps": 6200,
+        "elevation_gain_m": 45
+      },
+      {
+        "type": "weightlifting",
+        "start_time": "2026-02-16T06:00:00+00:00",
+        "end_time": "2026-02-16T06:45:00+00:00",
+        "duration_minutes": 45,
+        "calories_burned": 280,
+        "avg_heart_rate": 125,
+        "exercises": [
+          { "name": "bench_press", "sets": 4, "reps": 8, "weight_kg": 80 },
+          { "name": "squat", "sets": 4, "reps": 10, "weight_kg": 100 }
+        ]
+      }
+    ],
+    "source_type": "daily",
+    "schema_version": 1,
+    "source": {
+      "app": "samsung_health",
+      "version": "6.28.1.011",
+      "device": "samsung-sm-s901b",
+      "sync_method": "api_v2"
+    }
+  }
