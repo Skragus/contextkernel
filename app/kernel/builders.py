@@ -140,7 +140,7 @@ async def _build_card(
             tracking_start = target_start
         current_date = target_end_exclusive - timedelta(days=1)
         cov = features.manual_tracking_coverage_vector(
-            target_rows, settings.goals_tracking_recent_days, tracking_start, current_date
+            target_rows + baseline_rows, settings.goals_tracking_recent_days, tracking_start, current_date
         )
         tc_status_for_steps = features.tracking_status_from_coverage(cov["manual_coverage_7d"])
 
@@ -218,6 +218,7 @@ async def _build_card(
             continue
 
         # Phase 2: calories_total uses weekly deficit evaluation
+        calories_weekly_deficit: float | None = None
         if signal_name == "calories_total" and goal:
             burned_series = target_series.get("total_calories_burned", [])
             eaten_series = vals  # calories_total
@@ -227,8 +228,9 @@ async def _build_card(
             burned_7d = all_burned[-7:] if all_burned else []
             eaten_7d = all_eaten[-7:] if all_eaten else []
             modifier = settings.goals_calories_burned_modifier
-            deficit_target = settings.goals_calorie_deficit_target * 7.0  # weekly goal
+            deficit_target = settings.goals_calorie_deficit_target * 7.0  # weekly goal (kcal)
             actual_deficit = features.compute_weekly_deficit(burned_7d, eaten_7d, modifier)
+            calories_weekly_deficit = actual_deficit
             progress_pct = features.weekly_deficit_progress(actual_deficit, deficit_target)
             status = features.calorie_status_from_progress(progress_pct)
             priority = goal.priority
@@ -241,11 +243,14 @@ async def _build_card(
             priority = goal.priority
             trend = features.compute_trend(vals, bl_vals)
 
+        # Phase 2 calories: value = actual weekly deficit (kcal), same units as target
+        display_val = round(calories_weekly_deficit, 1) if calories_weekly_deficit is not None else current_val
+
         signals.append(
             Signal(
                 name=signal_name.replace("_", " ").title(),
                 record_type=signal_name,
-                value=current_val,
+                value=display_val,
                 unit=cfg.unit,
                 aggregation=cfg.agg,
                 baseline=baseline_val,
@@ -305,7 +310,7 @@ async def _build_card(
         current_date = target_end_exclusive - timedelta(days=1)  # Last day of target range
         recent_days = settings.goals_tracking_recent_days
         coverage_vector = features.manual_tracking_coverage_vector(
-            target_rows, recent_days, tracking_start, current_date
+            target_rows + baseline_rows, recent_days, tracking_start, current_date
         )
         
         # Status from 7-day coverage
