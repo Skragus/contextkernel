@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 
 def trailing_average(values: list[float], window: int | None = None) -> float | None:
@@ -187,3 +187,137 @@ def tracking_consistency(
                 continue
             break
     return min(tracked / expected_days, 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Tracking consistency helpers
+# ---------------------------------------------------------------------------
+
+def find_tracking_start_date(rows: list[dict]) -> date | None:
+    """Find the earliest date with manual tracking signals (weight OR calories).
+
+    Returns None if no manual signals found.
+    """
+    if not rows:
+        return None
+    
+    manual_dates: list[date] = []
+    for row in rows:
+        raw = row.get("raw_data") or {}
+        row_date = row.get("date")
+        if not isinstance(row_date, date):
+            continue
+        
+        # Check for calories_total
+        nutrition = raw.get("nutrition_summary")
+        if isinstance(nutrition, dict) and nutrition.get("calories_total") is not None:
+            manual_dates.append(row_date)
+            continue
+        
+        # Check for weight_kg
+        body = raw.get("body_metrics")
+        if isinstance(body, dict) and body.get("weight_kg") is not None:
+            manual_dates.append(row_date)
+    
+    return min(manual_dates) if manual_dates else None
+
+
+def manual_tracking_coverage_vector(
+    rows: list[dict],
+    recent_days: int,
+    tracking_start: date,
+    current_date: date,
+) -> dict[str, float]:
+    """Compute manual tracking coverage vector.
+
+    Returns:
+        - manual_coverage_7d: ratio of days with weight OR calories in last N days
+        - manual_coverage_30d: ratio in last 30 days (or since tracking_start, whichever shorter)
+        - days_since_last_manual_entry: days since last weight OR calories entry
+        - streak_manual_days: current consecutive days with weight OR calories
+    """
+    if not rows:
+        return {
+            "manual_coverage_7d": 0.0,
+            "manual_coverage_30d": 0.0,
+            "days_since_last_manual_entry": 999.0,
+            "streak_manual_days": 0,
+        }
+    
+    # Filter rows to those with manual signals
+    manual_rows: list[dict] = []
+    for row in rows:
+        raw = row.get("raw_data") or {}
+        row_date = row.get("date")
+        if not isinstance(row_date, date):
+            continue
+        
+        has_calories = False
+        nutrition = raw.get("nutrition_summary")
+        if isinstance(nutrition, dict) and nutrition.get("calories_total") is not None:
+            has_calories = True
+        
+        has_weight = False
+        body = raw.get("body_metrics")
+        if isinstance(body, dict) and body.get("weight_kg") is not None:
+            has_weight = True
+        
+        if has_calories or has_weight:
+            manual_rows.append(row)
+    
+    if not manual_rows:
+        return {
+            "manual_coverage_7d": 0.0,
+            "manual_coverage_30d": 0.0,
+            "days_since_last_manual_entry": float("inf"),
+            "streak_manual_days": 0,
+        }
+    
+    # Sort by date
+    manual_rows.sort(key=lambda r: r.get("date") or date.min)
+    manual_dates = {r.get("date") for r in manual_rows if isinstance(r.get("date"), date)}
+    
+    # Recent coverage (last N days)
+    recent_cutoff = current_date - timedelta(days=recent_days)
+    recent_manual = sum(1 for d in manual_dates if d >= recent_cutoff)
+    recent_coverage_7d = recent_manual / recent_days if recent_days > 0 else 0.0
+    
+    # 30-day coverage (or since tracking_start, whichever shorter)
+    days_since_start = (current_date - tracking_start).days
+    window_30d = min(30, days_since_start + 1)
+    cutoff_30d = current_date - timedelta(days=window_30d - 1)
+    manual_30d = sum(1 for d in manual_dates if d >= cutoff_30d)
+    recent_coverage_30d = manual_30d / window_30d if window_30d > 0 else 0.0
+    
+    # Days since last manual entry
+    if manual_dates:
+        last_manual = max(manual_dates)
+        days_since_last = (current_date - last_manual).days
+    else:
+        days_since_last = float("inf")
+    
+    # Streak (consecutive days from current_date backwards)
+    streak = 0
+    check_date = current_date
+    while check_date >= tracking_start:
+        if check_date in manual_dates:
+            streak += 1
+            check_date -= timedelta(days=1)
+        else:
+            break
+    
+    return {
+        "manual_coverage_7d": min(max(recent_coverage_7d, 0.0), 1.0),
+        "manual_coverage_30d": min(max(recent_coverage_30d, 0.0), 1.0),
+        "days_since_last_manual_entry": days_since_last if days_since_last != float("inf") else 999.0,
+        "streak_manual_days": streak,
+    }
+
+
+def tracking_status_from_coverage(coverage_7d: float) -> str:
+    """Map 7-day coverage to status: Green ≥85%, Yellow ≥70%, Red <70%."""
+    if coverage_7d >= 0.85:
+        return "green"
+    if coverage_7d >= 0.70:
+        return "yellow"
+    return "red"

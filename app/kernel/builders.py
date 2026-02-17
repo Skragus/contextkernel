@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.kernel import connector, extractor, features
 from app.kernel.models import (
     CardEnvelope,
@@ -196,13 +197,39 @@ async def _build_card(
             )
         )
 
-    # Virtual signal: tracking consistency (T1)
+    # Virtual signal: tracking consistency (T1) - Phase 1 upgrade
     tc_goal = get_goal("tracking_consistency")
     if tc_goal:
-        tc_value = features.tracking_consistency(target_rows, target_days)
-        tc_bl_value = features.tracking_consistency(baseline_rows, (target_start - baseline_start).days or 1) if baseline_rows else 0.0
-        tc_pct = features.goal_progress_pct(tc_value, tc_goal.target_value, tc_goal.target_type)
-        tc_trend = features.compute_trend([tc_value], [tc_bl_value]) if tc_bl_value > 0 else "flat"
+        # Determine tracking start date (config override or find from data)
+        tracking_start: date | None = None
+        if settings.goals_tracking_start_date:
+            try:
+                tracking_start = date.fromisoformat(settings.goals_tracking_start_date)
+            except ValueError:
+                pass
+        
+        if tracking_start is None:
+            # Query all rows to find tracking start (or use target_rows if that's all we have)
+            all_rows_for_start = target_rows + baseline_rows
+            tracking_start = features.find_tracking_start_date(all_rows_for_start)
+        
+        if tracking_start is None:
+            # Fallback: use target_start if we can't determine
+            tracking_start = target_start
+        
+        # Compute coverage vector
+        current_date = target_end_exclusive - timedelta(days=1)  # Last day of target range
+        recent_days = settings.goals_tracking_recent_days
+        coverage_vector = features.manual_tracking_coverage_vector(
+            target_rows, recent_days, tracking_start, current_date
+        )
+        
+        # Status from 7-day coverage
+        tc_status = features.tracking_status_from_coverage(coverage_vector["manual_coverage_7d"])
+        
+        # Value is the 7-day coverage for backward compatibility
+        tc_value = coverage_vector["manual_coverage_7d"]
+        
         signals.append(
             Signal(
                 name="Tracking Consistency",
@@ -210,11 +237,12 @@ async def _build_card(
                 value=round(tc_value, 2),
                 unit="ratio",
                 aggregation="avg",
-                target=tc_goal.target_value,
-                target_progress_pct=round(tc_pct, 1) if tc_pct is not None else None,
+                target=1.0,  # 100% is the ideal
+                target_progress_pct=round(tc_value * 100.0, 1),
                 priority=tc_goal.priority,
-                status=features.goal_status(tc_pct),
-                trend=tc_trend,
+                status=tc_status,
+                trend=None,  # Trend not computed for tracking (it's about consistency, not direction)
+                coverage_vector=coverage_vector,
             )
         )
 

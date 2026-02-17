@@ -9,9 +9,12 @@ import pytest
 
 from app.kernel.features import (
     compute_trend,
+    find_tracking_start_date,
     goal_progress_pct,
     goal_status,
+    manual_tracking_coverage_vector,
     tracking_consistency,
+    tracking_status_from_coverage,
 )
 from app.kernel.goals_config import GOALS_BY_SIGNAL, get_goal, list_goals
 from app.kernel.builders import build_daily_summary
@@ -314,3 +317,148 @@ class TestBuilderGoalIntegration:
         assert hr.priority is None
         assert hr.status is None
         assert hr.trend is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Tracking consistency vector tests
+# ---------------------------------------------------------------------------
+
+class TestFindTrackingStartDate:
+    def test_finds_earliest_manual_signal(self):
+        rows = [
+            make_daily_row(date(2026, 2, 10), steps_total=5000),  # Auto only
+            make_daily_row(date(2026, 2, 11), body_metrics={"weight_kg": 130.0}),  # Manual
+            make_daily_row(date(2026, 2, 12), nutrition_summary={"calories_total": 2000}),  # Manual
+        ]
+        result = find_tracking_start_date(rows)
+        assert result == date(2026, 2, 11)
+
+    def test_returns_none_if_no_manual_signals(self):
+        rows = [
+            make_daily_row(date(2026, 2, 10), steps_total=5000),
+            make_daily_row(date(2026, 2, 11), steps_total=6000),
+        ]
+        result = find_tracking_start_date(rows)
+        assert result is None
+
+    def test_handles_empty_list(self):
+        assert find_tracking_start_date([]) is None
+
+
+class TestManualTrackingCoverageVector:
+    def test_full_coverage_7d(self):
+        tracking_start = date(2026, 2, 9)
+        current_date = date(2026, 2, 16)
+        rows = [
+            make_daily_row(
+                date(2026, 2, 10),
+                nutrition_summary={"calories_total": 2000},
+                body_metrics={"weight_kg": 130.0},
+            )
+            for i in range(7)  # 7 days of manual tracking
+        ]
+        # Adjust dates
+        for i, row in enumerate(rows):
+            row["date"] = current_date - timedelta(days=6 - i)
+
+        result = manual_tracking_coverage_vector(rows, recent_days=7, tracking_start=tracking_start, current_date=current_date)
+        assert result["manual_coverage_7d"] == 1.0
+        assert result["streak_manual_days"] == 7
+
+    def test_partial_coverage(self):
+        tracking_start = date(2026, 2, 9)
+        current_date = date(2026, 2, 16)
+        rows = [
+            make_daily_row(date(2026, 2, 10), nutrition_summary={"calories_total": 2000}),
+            make_daily_row(date(2026, 2, 12), body_metrics={"weight_kg": 130.0}),
+            make_daily_row(date(2026, 2, 14), nutrition_summary={"calories_total": 1800}),
+        ]
+
+        result = manual_tracking_coverage_vector(rows, recent_days=7, tracking_start=tracking_start, current_date=current_date)
+        assert 0.0 < result["manual_coverage_7d"] < 1.0
+
+    def test_days_since_last(self):
+        tracking_start = date(2026, 2, 9)
+        current_date = date(2026, 2, 16)
+        rows = [
+            make_daily_row(date(2026, 2, 10), nutrition_summary={"calories_total": 2000}),
+        ]
+
+        result = manual_tracking_coverage_vector(rows, recent_days=7, tracking_start=tracking_start, current_date=current_date)
+        assert result["days_since_last_manual_entry"] == 6  # 6 days ago
+
+    def test_empty_rows(self):
+        tracking_start = date(2026, 2, 9)
+        current_date = date(2026, 2, 16)
+        result = manual_tracking_coverage_vector([], recent_days=7, tracking_start=tracking_start, current_date=current_date)
+        assert result["manual_coverage_7d"] == 0.0
+        assert result["streak_manual_days"] == 0
+        assert result["days_since_last_manual_entry"] == 999.0
+
+
+class TestTrackingStatusFromCoverage:
+    def test_green_high_coverage(self):
+        assert tracking_status_from_coverage(0.90) == "green"
+        assert tracking_status_from_coverage(0.85) == "green"
+
+    def test_yellow_moderate_coverage(self):
+        assert tracking_status_from_coverage(0.75) == "yellow"
+        assert tracking_status_from_coverage(0.70) == "yellow"
+
+    def test_red_low_coverage(self):
+        assert tracking_status_from_coverage(0.50) == "red"
+        assert tracking_status_from_coverage(0.0) == "red"
+
+
+class TestBuilderPhase1Integration:
+    @pytest.mark.asyncio
+    async def test_tracking_consistency_has_coverage_vector(self):
+        session = AsyncMock()
+        target_rows = [
+            make_daily_row(
+                date(2026, 2, 15),
+                nutrition_summary={"calories_total": 2000},
+                body_metrics={"weight_kg": 130.0},
+            )
+        ]
+
+        async def _fetch(sess, start, end_exclusive, device_id=None):
+            if start >= date(2026, 2, 15):
+                return target_rows
+            return []
+
+        with patch("app.kernel.builders.connector.fetch_daily_rows", side_effect=_fetch):
+            env = await build_daily_summary(session, date(2026, 2, 15))
+
+        tc = next((s for s in env.signals if s.record_type == "tracking_consistency"), None)
+        assert tc is not None
+        assert tc.coverage_vector is not None
+        assert "manual_coverage_7d" in tc.coverage_vector
+        assert "manual_coverage_30d" in tc.coverage_vector
+        assert "days_since_last_manual_entry" in tc.coverage_vector
+        assert "streak_manual_days" in tc.coverage_vector
+
+    @pytest.mark.asyncio
+    async def test_tracking_status_from_coverage_vector(self):
+        session = AsyncMock()
+        # Create 7 days of full tracking
+        target_rows = [
+            make_daily_row(
+                date(2026, 2, 9) + timedelta(days=i),
+                nutrition_summary={"calories_total": 2000},
+            )
+            for i in range(7)
+        ]
+
+        async def _fetch(sess, start, end_exclusive, device_id=None):
+            if start >= date(2026, 2, 9):
+                return target_rows
+            return []
+
+        with patch("app.kernel.builders.connector.fetch_daily_rows", side_effect=_fetch):
+            env = await build_daily_summary(session, date(2026, 2, 15))
+
+        tc = next((s for s in env.signals if s.record_type == "tracking_consistency"), None)
+        assert tc is not None
+        assert tc.status in ("green", "yellow", "red")
+        assert tc.coverage_vector["manual_coverage_7d"] >= 0.0
