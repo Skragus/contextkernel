@@ -324,19 +324,90 @@ def tracking_status_from_coverage(coverage_7d: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: Weekly deficit helpers
+# Phase 2: Weekly deficit helpers (BMR + steps-based activity)
 # ---------------------------------------------------------------------------
+
+def _bmr_mifflin_st_jeor(weight_kg: float, height_cm: float, age_years: int, sex: str) -> float:
+    """Mifflin-St Jeor BMR formula. Returns kcal/day."""
+    base = 10.0 * weight_kg + 6.25 * height_cm - 5.0 * age_years
+    if sex and str(sex).lower().startswith("f"):
+        return base - 161.0
+    return base + 5.0  # male default
+
+
+def _bmr_from_row(raw: dict, age_years: int | None, sex: str | None) -> float | None:
+    """Get BMR for a row: prefer body_metrics.bmr_kcal, else Mifflin-St Jeor from weight/height."""
+    body = raw.get("body_metrics") if isinstance(raw, dict) else None
+    if not isinstance(body, dict):
+        return None
+    bmr = body.get("bmr_kcal")
+    if bmr is not None:
+        try:
+            return float(bmr)
+        except (TypeError, ValueError):
+            pass
+    w = body.get("weight_kg")
+    h = body.get("height_cm")
+    if w is None or h is None:
+        return None
+    try:
+        weight = float(w)
+        height = float(h)
+    except (TypeError, ValueError):
+        return None
+    age = age_years if age_years is not None and age_years > 0 else 30
+    return _bmr_mifflin_st_jeor(weight, height, age, sex or "male")
+
+
+def _activity_kcal_from_steps(steps: float, steps_to_kcal: float, activity_modifier: float) -> float:
+    """Earned activity calories = steps * steps_to_kcal * activity_modifier (conservative)."""
+    return max(0.0, steps * steps_to_kcal * activity_modifier)
+
+
+def compute_weekly_deficit_from_rows(
+    rows: list[dict],
+    steps_to_kcal: float,
+    activity_modifier: float,
+    age_years: int | None = None,
+    sex: str | None = None,
+) -> float:
+    """Compute weekly deficit from date-aligned rows.
+
+    Model: daily burn = BMR + (steps * steps_to_kcal * activity_modifier)
+    Deficit = burn - eaten. Uses height, weight, steps from each row; BMR from
+    body_metrics.bmr_kcal or Mifflin-St Jeor; activity from steps only.
+    """
+    total = 0.0
+    for row in rows:
+        raw = row.get("raw_data") or {}
+        bmr = _bmr_from_row(raw, age_years, sex)
+        if bmr is None or bmr <= 0:
+            bmr = 1500.0  # fallback
+        steps_val = 0.0
+        if "steps_total" in raw and raw["steps_total"] is not None:
+            try:
+                steps_val = float(raw["steps_total"])
+            except (TypeError, ValueError):
+                pass
+        activity = _activity_kcal_from_steps(steps_val, steps_to_kcal, activity_modifier)
+        burned = bmr + activity
+        eaten = 0.0
+        nut = raw.get("nutrition_summary")
+        if isinstance(nut, dict) and nut.get("calories_total") is not None:
+            try:
+                eaten = float(nut["calories_total"])
+            except (TypeError, ValueError):
+                pass
+        total += burned - eaten
+    return total
+
 
 def compute_weekly_deficit(
     calories_burned: list[float],
     calories_eaten: list[float],
     modifier: float,
 ) -> float:
-    """Compute weekly deficit: Σ(burned * modifier - eaten) over 7-day series.
-
-    Returns 0.0 if lists are empty or mismatched. Padding: missing values
-    treated as 0 for that day.
-    """
+    """Legacy: Σ(burned * modifier - eaten). Prefer compute_weekly_deficit_from_rows."""
     if not calories_burned and not calories_eaten:
         return 0.0
     n = max(len(calories_burned), len(calories_eaten))

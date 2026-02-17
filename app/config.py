@@ -17,8 +17,9 @@ class Settings(BaseSettings):
     goals_tracking_start_date: str | None = None  # ISO date string, e.g. "2026-02-09" (overrides DB query)
 
     # Phase 2: Calories weekly deficit config
-    goals_calorie_deficit_target: float = 500.0  # kcal/day target
-    goals_calories_burned_modifier: float = 0.5  # Multiplier for total_calories_burned
+    goals_calorie_deficit_target: float = 500.0  # kcal/day target (3500/week)
+    goals_steps_to_kcal: float = 0.04  # kcal per step (activity above sedentary)
+    goals_activity_modifier: float = 0.5  # Conservative factor for earned activity calories (on top of BMR)
 
     # Phase 3: Steps gated ramp config
     goals_steps_floor: float = 3500.0  # Minimum acceptable 14d avg

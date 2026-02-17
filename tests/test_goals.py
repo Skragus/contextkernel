@@ -13,6 +13,7 @@ from app.kernel.features import (
     compute_steps_baseline,
     compute_trend,
     compute_weekly_deficit,
+    compute_weekly_deficit_from_rows,
     find_tracking_start_date,
     goal_progress_pct,
     goal_status,
@@ -511,6 +512,33 @@ class TestComputeWeeklyDeficit:
         assert result == 2500.0
 
 
+class TestComputeWeeklyDeficitFromRows:
+    """BMR + steps-based activity deficit model."""
+
+    def test_bmr_and_steps_deficit(self):
+        rows = [
+            make_daily_row(
+                date(2026, 2, 9) + timedelta(days=i),
+                body_metrics={"weight_kg": 130.0, "height_cm": 193.0},
+                nutrition_summary={"calories_total": 2000},
+                steps_total=10000,
+            )
+            for i in range(7)
+        ]
+        result = compute_weekly_deficit_from_rows(
+            rows,
+            steps_to_kcal=0.04,
+            activity_modifier=0.5,
+            age_years=30,
+            sex="male",
+        )
+        # BMR ~2360, activity 10k*0.04*0.5=200, burn ~2560. Eaten 2000. Deficit 560/day * 7 = 3920
+        assert result > 3500
+
+    def test_empty_rows_zero(self):
+        assert compute_weekly_deficit_from_rows([], 0.04, 0.5) == 0.0
+
+
 class TestWeeklyDeficitProgress:
     def test_full_progress(self):
         assert weekly_deficit_progress(3500.0, 3500.0) == 100.0
@@ -543,12 +571,14 @@ class TestBuilderPhase2Integration:
     @pytest.mark.asyncio
     async def test_calories_uses_weekly_deficit(self):
         session = AsyncMock()
-        # 7 days: high burn, low intake -> deficit
+        # BMR + steps-based activity - eaten. BMR ~2360 (130kg, 193cm), 10k steps * 0.04 * 0.5 = 200 activity
+        # burn ~2560, eaten 1500 -> deficit ~1060/day -> green
         target_rows = [
             make_daily_row(
                 date(2026, 2, 9) + timedelta(days=i),
                 nutrition_summary={"calories_total": 1500},
-                total_calories_burned=2800.0,
+                body_metrics={"weight_kg": 130.0, "height_cm": 193.0},
+                steps_total=10000,
             )
             for i in range(7)
         ]
@@ -570,12 +600,11 @@ class TestBuilderPhase2Integration:
     @pytest.mark.asyncio
     async def test_calories_surplus_yields_red(self):
         session = AsyncMock()
-        # 7 days: low burn, high intake -> surplus (negative deficit)
+        # BMR fallback 1500, no steps -> burn 1500. Eaten 3000 -> surplus -> red
         target_rows = [
             make_daily_row(
                 date(2026, 2, 9) + timedelta(days=i),
                 nutrition_summary={"calories_total": 3000},
-                total_calories_burned=1500.0,
             )
             for i in range(7)
         ]
