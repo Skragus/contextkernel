@@ -9,12 +9,15 @@ import pytest
 
 from app.kernel.features import (
     calorie_status_from_progress,
+    compute_dynamic_steps_target,
+    compute_steps_baseline,
     compute_trend,
     compute_weekly_deficit,
     find_tracking_start_date,
     goal_progress_pct,
     goal_status,
     manual_tracking_coverage_vector,
+    steps_status_from_avg,
     tracking_consistency,
     tracking_status_from_coverage,
     weekly_deficit_progress,
@@ -213,8 +216,9 @@ class TestBuilderGoalIntegration:
         steps = next((s for s in env.signals if s.record_type == "steps_total"), None)
         assert steps is not None
         assert steps.priority == 3
-        assert steps.target == 8000.0
-        assert steps.target_progress_pct == 100.0
+        # Phase 3: target is dynamic (baseline * ramp); tracking/calories red -> ramp 0 -> target=7000
+        assert steps.target == 7000.0
+        assert steps.target_progress_pct == 100.0  # 7375 avg >= 7000 target
         assert steps.status == "green"
         assert steps.trend is not None
 
@@ -587,3 +591,148 @@ class TestBuilderPhase2Integration:
         cals = next((s for s in env.signals if s.record_type == "calories_total"), None)
         assert cals is not None
         assert cals.status == "red"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Steps gated ramp tests
+# ---------------------------------------------------------------------------
+
+class TestComputeStepsBaseline:
+    def test_14d_avg(self):
+        steps = [1000.0] * 14
+        assert compute_steps_baseline(steps) == 1000.0
+
+    def test_less_than_14_days(self):
+        steps = [5000.0, 6000.0, 7000.0]
+        assert compute_steps_baseline(steps) == 6000.0
+
+    def test_empty(self):
+        assert compute_steps_baseline([]) == 0.0
+
+    def test_uses_last_14(self):
+        steps = list(range(20))  # 0..19
+        assert compute_steps_baseline(steps) == (6 + 7 + 8 + 9 + 10 + 11 + 12 + 13 + 14 + 15 + 16 + 17 + 18 + 19) / 14
+
+
+class TestComputeDynamicStepsTarget:
+    def test_fast_ramp_when_both_green(self):
+        target = compute_dynamic_steps_target(
+            baseline_14d_avg=6000.0,
+            tracking_status="green",
+            calories_status="green",
+            ramp_rate_fast=0.075,
+            ramp_rate_slow=0.025,
+            long_term_target=8000.0,
+            floor=4000.0,
+        )
+        assert target == 6000.0 * 1.075  # 6450
+
+    def test_slow_ramp_when_yellow(self):
+        target = compute_dynamic_steps_target(
+            baseline_14d_avg=6000.0,
+            tracking_status="yellow",
+            calories_status="green",
+            ramp_rate_fast=0.075,
+            ramp_rate_slow=0.025,
+            long_term_target=8000.0,
+            floor=4000.0,
+        )
+        assert target == 6000.0 * 1.025  # 6150
+
+    def test_no_ramp_when_red(self):
+        target = compute_dynamic_steps_target(
+            baseline_14d_avg=6000.0,
+            tracking_status="red",
+            calories_status="green",
+            ramp_rate_fast=0.075,
+            ramp_rate_slow=0.025,
+            long_term_target=8000.0,
+            floor=4000.0,
+        )
+        assert target == 6000.0  # no ramp
+
+    def test_capped_at_long_term(self):
+        target = compute_dynamic_steps_target(
+            baseline_14d_avg=8000.0,
+            tracking_status="green",
+            calories_status="green",
+            ramp_rate_fast=0.075,
+            ramp_rate_slow=0.025,
+            long_term_target=8000.0,
+            floor=4000.0,
+        )
+        assert target == 8000.0  # capped
+
+    def test_floor_applied(self):
+        target = compute_dynamic_steps_target(
+            baseline_14d_avg=2000.0,
+            tracking_status="red",
+            calories_status="red",
+            ramp_rate_fast=0.075,
+            ramp_rate_slow=0.025,
+            long_term_target=8000.0,
+            floor=4000.0,
+        )
+        assert target == 4000.0  # floor
+
+
+class TestStepsStatusFromAvg:
+    def test_green_above_target(self):
+        assert steps_status_from_avg(8500.0, 8000.0, 4000.0) == "green"
+
+    def test_yellow_between_floor_and_target(self):
+        assert steps_status_from_avg(6000.0, 8000.0, 4000.0) == "yellow"
+
+    def test_red_below_floor(self):
+        assert steps_status_from_avg(3000.0, 8000.0, 4000.0) == "red"
+
+
+class TestBuilderPhase3Integration:
+    @pytest.mark.asyncio
+    async def test_steps_uses_dynamic_target(self):
+        session = AsyncMock()
+        target_rows = [
+            make_daily_row(date(2026, 2, 9) + timedelta(days=i), steps_total=9000)
+            for i in range(7)
+        ]
+        baseline_rows = [
+            make_daily_row(date(2026, 2, 2) + timedelta(days=i), steps_total=8500)
+            for i in range(7)
+        ]
+
+        async def _fetch(sess, start, end_exclusive, device_id=None):
+            if start >= date(2026, 2, 9):
+                return target_rows
+            return baseline_rows
+
+        with patch("app.kernel.builders.connector.fetch_daily_rows", side_effect=_fetch):
+            env = await build_daily_summary(session, date(2026, 2, 15))
+
+        steps = next((s for s in env.signals if s.record_type == "steps_total"), None)
+        assert steps is not None
+        assert steps.priority == 3
+        assert steps.target is not None
+        assert steps.value is not None  # 14d avg
+        assert steps.status in ("green", "yellow", "red")
+
+    @pytest.mark.asyncio
+    async def test_steps_gated_by_p1_p2(self):
+        """When tracking/calories red, steps ramp should be 0."""
+        session = AsyncMock()
+        # No manual tracking (no calories, no weight) -> tracking red
+        target_rows = [
+            make_daily_row(date(2026, 2, 9) + timedelta(days=i), steps_total=5000)
+            for i in range(7)
+        ]
+
+        async def _fetch(sess, start, end_exclusive, device_id=None):
+            if start >= date(2026, 2, 9):
+                return target_rows
+            return []
+
+        with patch("app.kernel.builders.connector.fetch_daily_rows", side_effect=_fetch):
+            env = await build_daily_summary(session, date(2026, 2, 15))
+
+        steps = next((s for s in env.signals if s.record_type == "steps_total"), None)
+        assert steps is not None
+        assert steps.target == 5000.0  # baseline 5000, ramp 0 -> target 5000

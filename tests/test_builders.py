@@ -60,7 +60,8 @@ class TestBuildDailySummary:
         assert env.card_type == "daily_summary"
         steps_sig = next((s for s in env.signals if s.record_type == "steps_total"), None)
         assert steps_sig is not None
-        assert steps_sig.value == 2530.0
+        # Phase 3: steps value is 14d rolling avg, not raw sum
+        assert steps_sig.value is not None
         assert steps_sig.baseline is not None
         assert env.evidence.total_rows >= 1
 
@@ -136,4 +137,5 @@ class TestBuildMonthlyOverview:
 
         steps_sig = next((s for s in env.signals if s.record_type == "steps_total"), None)
         assert steps_sig is not None
-        assert steps_sig.value == 700.0  # sum
+        # Phase 3: steps value is 14d rolling avg (2 days: 400+300)/2 = 350
+        assert steps_sig.value == 350.0

@@ -125,6 +125,25 @@ async def _build_card(
     target_series = extractor.extract_signal_series(target_rows)
     baseline_series = extractor.extract_signal_series(baseline_rows)
 
+    # Pre-compute tracking status for Phase 3 (steps gated ramp)
+    tc_status_for_steps = "red"
+    if get_goal("tracking_consistency"):
+        tracking_start: date | None = None
+        if settings.goals_tracking_start_date:
+            try:
+                tracking_start = date.fromisoformat(settings.goals_tracking_start_date)
+            except ValueError:
+                pass
+        if tracking_start is None:
+            tracking_start = features.find_tracking_start_date(target_rows + baseline_rows)
+        if tracking_start is None:
+            tracking_start = target_start
+        current_date = target_end_exclusive - timedelta(days=1)
+        cov = features.manual_tracking_coverage_vector(
+            target_rows, settings.goals_tracking_recent_days, tracking_start, current_date
+        )
+        tc_status_for_steps = features.tracking_status_from_coverage(cov["manual_coverage_7d"])
+
     signals: list[Signal] = []
     evidence_sources: list[EvidenceSource] = []
     signal_coverages: list[SignalCoverage] = []
@@ -150,6 +169,53 @@ async def _build_card(
         priority = None
         trend = None
         target = None
+
+        # Phase 3: steps_total uses gated ramp (depends on P1/P2)
+        if signal_name == "steps_total" and goal:
+            bl_steps = baseline_series.get("steps_total", []) or []
+            tg_steps = vals or []
+            all_steps = bl_steps + tg_steps
+            current_14d = features.compute_steps_baseline(all_steps[-14:]) if all_steps else 0.0
+            baseline_14d = features.compute_steps_baseline(bl_steps[-14:]) if bl_steps else current_14d
+            cals_sig = next((s for s in signals if s.record_type == "calories_total"), None)
+            cals_status = cals_sig.status if cals_sig else "red"
+            floor = settings.goals_steps_floor
+            long_term = settings.goals_steps_long_term_target
+            dynamic_target = features.compute_dynamic_steps_target(
+                baseline_14d, tc_status_for_steps, cals_status,
+                settings.goals_steps_ramp_rate_fast, settings.goals_steps_ramp_rate_slow,
+                long_term, floor,
+            )
+            status = features.steps_status_from_avg(current_14d, dynamic_target, floor)
+            priority = goal.priority
+            target = dynamic_target
+            value_for_signal = round(current_14d, 1)
+            progress_pct = min(100.0, (current_14d / dynamic_target) * 100.0) if dynamic_target > 0 else 0.0
+            trend = features.compute_trend(tg_steps, bl_steps)
+            signals.append(
+                Signal(
+                    name=signal_name.replace("_", " ").title(),
+                    record_type=signal_name,
+                    value=value_for_signal,
+                    unit=cfg.unit,
+                    aggregation="avg",
+                    baseline=baseline_val,
+                    delta=delta,
+                    target=dynamic_target,
+                    target_progress_pct=round(progress_pct, 1),
+                    priority=priority,
+                    status=status,
+                    trend=trend,
+                )
+            )
+            # Evidence, coverage, drilldown for steps
+            days_with_data = len(vals)
+            signal_coverages.append(SignalCoverage(signal_name=signal_name, completeness=features.coverage_ratio(days_with_data, target_days)))
+            earliest_date = min(row["date"] for row in target_rows) if target_rows else None
+            latest_date = max(row["date"] for row in target_rows) if target_rows else None
+            evidence_sources.append(EvidenceSource(record_type=signal_name, row_count=days_with_data, earliest=datetime.combine(earliest_date, time.min, tzinfo=timezone.utc) if earliest_date else None, latest=datetime.combine(latest_date, time.min, tzinfo=timezone.utc) if latest_date else None))
+            drilldowns.append(Drilldown(label=f"Signal: {signal_name}", type="records", params={"signal": signal_name, "from": target_start.isoformat(), "to": target_end_exclusive.isoformat()}))
+            continue
 
         # Phase 2: calories_total uses weekly deficit evaluation
         if signal_name == "calories_total" and goal:

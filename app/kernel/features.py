@@ -362,3 +362,52 @@ def calorie_status_from_progress(progress_pct: float) -> str:
     if progress_pct >= 20.0:
         return "yellow"
     return "red"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Steps gated ramp helpers
+# ---------------------------------------------------------------------------
+
+def compute_steps_baseline(steps_series: list[float], window: int = 14) -> float:
+    """14-day rolling average of steps. Uses all available if < 14 days."""
+    if not steps_series:
+        return 0.0
+    subset = steps_series[-window:] if len(steps_series) >= window else steps_series
+    return sum(subset) / len(subset)
+
+
+def compute_dynamic_steps_target(
+    baseline_14d_avg: float,
+    tracking_status: str,
+    calories_status: str,
+    ramp_rate_fast: float,
+    ramp_rate_slow: float,
+    long_term_target: float,
+    floor: float,
+) -> float:
+    """Compute dynamic steps target based on P1/P2 statuses (gated ramp).
+
+    - tracking green AND calories green → ramp_rate_fast
+    - tracking yellow OR calories yellow → ramp_rate_slow
+    - either red → 0% (stabilize)
+    Target = baseline * (1 + ramp_rate), capped at long_term_target, floored at floor.
+    """
+    if tracking_status == "red" or calories_status == "red":
+        ramp_rate = 0.0
+    elif tracking_status == "green" and calories_status == "green":
+        ramp_rate = ramp_rate_fast
+    else:
+        ramp_rate = ramp_rate_slow
+
+    target = baseline_14d_avg * (1.0 + ramp_rate)
+    target = min(target, long_term_target)
+    return max(target, floor)
+
+
+def steps_status_from_avg(avg_14d: float, dynamic_target: float, floor: float) -> str:
+    """Map 14d avg vs dynamic target to status: below floor=red, above target=green, else yellow."""
+    if avg_14d < floor:
+        return "red"
+    if avg_14d >= dynamic_target:
+        return "green"
+    return "yellow"
