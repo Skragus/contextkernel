@@ -77,17 +77,16 @@ def make_daily_row(
     body_metrics: dict | None = None,
     heart_rate_summary: dict | None = None,
     sleep_sessions: list | None = None,
-    row_id: int = 1,
+    nutrition_summary: dict | None = None,
+    device_id: str = "test-device",
 ) -> dict[str, Any]:
-    """Helper to build a fake health_connect_daily row dict."""
-    return {
-        "id": row_id,
-        "device_id": "test-device",
-        "date": d,
+    """Helper to build a fake health_connect_daily row dict (raw_data structure)."""
+    raw = {
         "steps_total": steps_total,
         "body_metrics": body_metrics or {},
         "heart_rate_summary": heart_rate_summary or {},
         "sleep_sessions": sleep_sessions or [],
         "exercise_sessions": [],
-        "nutrition_summary": {},
+        "nutrition_summary": nutrition_summary or {},
     }
+    return {"device_id": device_id, "date": d, "raw_data": raw}

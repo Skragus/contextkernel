@@ -44,6 +44,7 @@ async def get_card(
     from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
     tz: str = Query(default=None, description="Timezone (e.g. US/Eastern)"),
+    device_id: str | None = Query(default=None, description="Filter by device (omit for all devices)"),
 ) -> CardEnvelope:
     if card_type not in CARD_BUILDERS:
         raise HTTPException(status_code=404, detail=f"Unknown card type: {card_type}")
@@ -53,13 +54,13 @@ async def get_card(
     _parse_date(to_date, "to")  # validate
 
     if card_type == "daily_summary":
-        return await builders.build_daily_summary(session, start, tz_name)
+        return await builders.build_daily_summary(session, start, tz_name, device_id)
 
     if card_type == "weekly_overview":
-        return await builders.build_weekly_overview(session, start, tz_name)
+        return await builders.build_weekly_overview(session, start, tz_name, device_id)
 
     if card_type == "monthly_overview":
-        return await builders.build_monthly_overview(session, start.year, start.month, tz_name)
+        return await builders.build_monthly_overview(session, start.year, start.month, tz_name, device_id)
 
     raise HTTPException(status_code=404, detail=f"Unknown card type: {card_type}")
 
@@ -103,6 +104,7 @@ async def preset_run(
     from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
     tz: str = Query(default=None, description="Timezone"),
+    device_id: str | None = Query(default=None, description="Filter by device (omit for all devices)"),
 ) -> list[CardEnvelope]:
     preset = get_preset(preset_id)
     if preset is None:
@@ -115,11 +117,11 @@ async def preset_run(
     results: list[CardEnvelope] = []
     for ct in preset.card_types:
         if ct == "daily_summary":
-            results.append(await builders.build_daily_summary(session, start, tz_name))
+            results.append(await builders.build_daily_summary(session, start, tz_name, device_id))
         elif ct == "weekly_overview":
-            results.append(await builders.build_weekly_overview(session, start, tz_name))
+            results.append(await builders.build_weekly_overview(session, start, tz_name, device_id))
         elif ct == "monthly_overview":
             results.append(
-                await builders.build_monthly_overview(session, start.year, start.month, tz_name)
+                await builders.build_monthly_overview(session, start.year, start.month, tz_name, device_id)
             )
     return results

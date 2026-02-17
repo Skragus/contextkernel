@@ -1,6 +1,6 @@
 """Card builders — the kernel.
 
-Queries health_connect_daily, extracts signals from typed + JSONB columns,
+Queries health_connect_daily (raw_data JSONB), extracts signals,
 aggregates, computes baselines/deltas, returns CardEnvelope.
 Graceful degradation: missing data never raises.
 """
@@ -50,6 +50,7 @@ async def _build_card(
     target_end_exclusive: date,
     baseline_start: date,
     tz_name: str,
+    device_id: str | None = None,
 ) -> CardEnvelope:
     tz = _tz(tz_name)
     range_start, range_end = _date_range_utc(target_start, target_end_exclusive, tz)
@@ -58,7 +59,7 @@ async def _build_card(
     if range_start > datetime.now(timezone.utc):
         warnings.append("Requested range is entirely in the future.")
 
-    target_rows = await connector.fetch_daily_rows(session, target_start, target_end_exclusive)
+    target_rows = await connector.fetch_daily_rows(session, target_start, target_end_exclusive, device_id)
 
     if not target_rows:
         warnings.append("No data found in the requested range.")
@@ -71,7 +72,7 @@ async def _build_card(
             coverage=Coverage(missing_sources=[], partial_days=[]),
         )
 
-    baseline_rows = await connector.fetch_daily_rows(session, baseline_start, target_start)
+    baseline_rows = await connector.fetch_daily_rows(session, baseline_start, target_start, device_id)
 
     target_series = extractor.extract_signal_series(target_rows)
     baseline_series = extractor.extract_signal_series(baseline_rows)
@@ -163,6 +164,7 @@ async def build_daily_summary(
     session: AsyncSession,
     target_date: date,
     tz_name: str = "UTC",
+    device_id: str | None = None,
 ) -> CardEnvelope:
     baseline_start = target_date - timedelta(days=features.baseline_window("daily"))
     return await _build_card(
@@ -173,6 +175,7 @@ async def build_daily_summary(
         target_end_exclusive=target_date + timedelta(days=1),
         baseline_start=baseline_start,
         tz_name=tz_name,
+        device_id=device_id,
     )
 
 
@@ -180,6 +183,7 @@ async def build_weekly_overview(
     session: AsyncSession,
     week_start: date,
     tz_name: str = "UTC",
+    device_id: str | None = None,
 ) -> CardEnvelope:
     weeks = features.baseline_window("weekly")
     baseline_start = week_start - timedelta(weeks=weeks)
@@ -191,6 +195,7 @@ async def build_weekly_overview(
         target_end_exclusive=week_start + timedelta(days=7),
         baseline_start=baseline_start,
         tz_name=tz_name,
+        device_id=device_id,
     )
 
 
@@ -199,6 +204,7 @@ async def build_monthly_overview(
     year: int,
     month: int,
     tz_name: str = "UTC",
+    device_id: str | None = None,
 ) -> CardEnvelope:
     first_day = date(year, month, 1)
     _, last = calendar.monthrange(year, month)
@@ -213,4 +219,5 @@ async def build_monthly_overview(
         target_end_exclusive=end_exclusive,
         baseline_start=baseline_start,
         tz_name=tz_name,
+        device_id=device_id,
     )

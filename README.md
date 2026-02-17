@@ -71,7 +71,7 @@ tests/
 - One call to `/kernel/cards/{type}` returns exactly one `CardEnvelope`.
 - Missing or partial data never causes a 500 — returns valid envelopes with coverage + warnings.
 - No DB migrations, no caching, no ML.
-- Table: `health_connect_daily` (id, device_id, date, steps_total, body_metrics, heart_rate_summary, sleep_sessions, exercise_sessions, nutrition_summary).
+- Table: `health_connect_daily` (device_id, date, source_type, raw_data JSONB). All metrics live in `raw_data`. Optional `device_id` query param to filter.
 
 ## Auth (optional)
 

@@ -49,7 +49,7 @@ class TestBuildDailySummary:
             for i in range(1, 8)
         ]
 
-        async def _fetch(sess, start, end_exclusive):
+        async def _fetch(sess, start, end_exclusive, device_id=None):
             if start >= date(2026, 2, 15):
                 return target_rows
             return baseline_rows
@@ -69,7 +69,7 @@ class TestBuildDailySummary:
         session = AsyncMock()
         target_rows = _target_rows(date(2026, 2, 15), avg_hr=72)
 
-        async def _fetch(sess, start, end_exclusive):
+        async def _fetch(sess, start, end_exclusive, device_id=None):
             if start >= date(2026, 2, 15):
                 return target_rows
             return []
@@ -98,7 +98,7 @@ class TestBuildWeeklyOverview:
         session = AsyncMock()
         rows = _target_rows(date(2026, 2, 10), steps_total=5000)
 
-        async def _fetch(sess, start, end_exclusive):
+        async def _fetch(sess, start, end_exclusive, device_id=None):
             if start >= date(2026, 2, 9):
                 return rows
             return []
@@ -126,7 +126,7 @@ class TestBuildMonthlyOverview:
             make_daily_row(date(2026, 2, 11), steps_total=300),
         ]
 
-        async def _fetch(sess, start, end_exclusive):
+        async def _fetch(sess, start, end_exclusive, device_id=None):
             if start >= date(2026, 2, 1):
                 return rows
             return []
