@@ -38,6 +38,7 @@ SIGNAL_CONFIG: dict[str, SignalConfig] = {
     "resting_hr": SignalConfig(column="raw_data", path="heart_rate_summary.resting_hr", agg="avg", unit="bpm"),
     "sleep_duration_minutes": SignalConfig(column="raw_data", path="sleep_sessions.0.duration_minutes", agg="avg", unit="min"),
     "calories_total": SignalConfig(column="raw_data", path="nutrition_summary.calories_total", agg="sum", unit="kcal"),
+    "total_calories_burned": SignalConfig(column="raw_data", path="total_calories_burned", agg="sum", unit="kcal"),
     "protein_grams": SignalConfig(column="raw_data", path="nutrition_summary.protein_grams", agg="sum", unit="g"),
 }
 

@@ -150,7 +150,25 @@ async def _build_card(
         priority = None
         trend = None
         target = None
-        if goal:
+
+        # Phase 2: calories_total uses weekly deficit evaluation
+        if signal_name == "calories_total" and goal:
+            burned_series = target_series.get("total_calories_burned", [])
+            eaten_series = vals  # calories_total
+            # Use last 7 days; pad with baseline if needed
+            all_burned = (baseline_series.get("total_calories_burned", []) or []) + (burned_series or [])
+            all_eaten = (baseline_series.get("calories_total", []) or []) + (eaten_series or [])
+            burned_7d = all_burned[-7:] if all_burned else []
+            eaten_7d = all_eaten[-7:] if all_eaten else []
+            modifier = settings.goals_calories_burned_modifier
+            deficit_target = settings.goals_calorie_deficit_target * 7.0  # weekly goal
+            actual_deficit = features.compute_weekly_deficit(burned_7d, eaten_7d, modifier)
+            progress_pct = features.weekly_deficit_progress(actual_deficit, deficit_target)
+            status = features.calorie_status_from_progress(progress_pct)
+            priority = goal.priority
+            target = deficit_target
+            trend = features.compute_trend(vals, bl_vals)
+        elif goal:
             target = goal.target_value
             progress_pct = features.goal_progress_pct(current_val, goal.target_value, goal.target_type)
             status = features.goal_status(progress_pct)

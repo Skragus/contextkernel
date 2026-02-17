@@ -8,13 +8,16 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.kernel.features import (
+    calorie_status_from_progress,
     compute_trend,
+    compute_weekly_deficit,
     find_tracking_start_date,
     goal_progress_pct,
     goal_status,
     manual_tracking_coverage_vector,
     tracking_consistency,
     tracking_status_from_coverage,
+    weekly_deficit_progress,
 )
 from app.kernel.goals_config import GOALS_BY_SIGNAL, get_goal, list_goals
 from app.kernel.builders import build_daily_summary
@@ -217,16 +220,19 @@ class TestBuilderGoalIntegration:
 
     @pytest.mark.asyncio
     async def test_calories_goal_under_target_is_green(self):
+        """Phase 2: 7 days of deficit (burn 3000*0.5=1500, eat 1000) -> surplus deficit -> green."""
         session = AsyncMock()
         target_rows = [
             make_daily_row(
-                date(2026, 2, 15),
-                nutrition_summary={"calories_total": 1500},
+                date(2026, 2, 9) + timedelta(days=i),
+                nutrition_summary={"calories_total": 1000},
+                total_calories_burned=3000.0,
             )
+            for i in range(7)
         ]
 
         async def _fetch(sess, start, end_exclusive, device_id=None):
-            if start >= date(2026, 2, 15):
+            if start >= date(2026, 2, 9):
                 return target_rows
             return []
 
@@ -236,7 +242,7 @@ class TestBuilderGoalIntegration:
         cals = next((s for s in env.signals if s.record_type == "calories_total"), None)
         assert cals is not None
         assert cals.status == "green"
-        assert cals.target_progress_pct == 100.0
+        assert cals.target_progress_pct == 100.0  # 7*500=3500 deficit / 3500 target
 
     @pytest.mark.asyncio
     async def test_tracking_consistency_signal_present(self):
@@ -462,3 +468,122 @@ class TestBuilderPhase1Integration:
         assert tc is not None
         assert tc.status in ("green", "yellow", "red")
         assert tc.coverage_vector["manual_coverage_7d"] >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Weekly deficit tests
+# ---------------------------------------------------------------------------
+
+class TestComputeWeeklyDeficit:
+    def test_basic_deficit(self):
+        burned = [2000.0] * 7
+        eaten = [1500.0] * 7
+        result = compute_weekly_deficit(burned, eaten, modifier=0.5)
+        # 7 * (2000*0.5 - 1500) = 7 * (1000 - 1500) = 7 * (-500) = -3500 (surplus)
+        # Actually 0.5 modifier: 2000*0.5 = 1000. So deficit = 1000 - 1500 = -500 per day = -3500 total
+        assert result == -3500.0
+
+    def test_deficit_when_eating_less(self):
+        burned = [2500.0] * 7  # TDEE proxy
+        eaten = [2000.0] * 7   # 500 deficit per day
+        result = compute_weekly_deficit(burned, eaten, modifier=0.5)
+        # 2500*0.5 - 2000 = 1250 - 2000 = -750 per day
+        # Hmm that's surplus. For deficit we need eaten < burned*modifier.
+        # Let's do: burned 3000, eaten 1500. 3000*0.5=1500, deficit=0. Or burned 3000, eaten 1000: deficit=500/day
+        burned = [3000.0] * 7
+        eaten = [1000.0] * 7
+        result = compute_weekly_deficit(burned, eaten, modifier=0.5)
+        # 3000*0.5 - 1000 = 1500 - 1000 = 500 per day, 3500 total
+        assert result == 3500.0
+
+    def test_empty_returns_zero(self):
+        assert compute_weekly_deficit([], [], 0.5) == 0.0
+
+    def test_mismatched_lengths_pads_with_zero(self):
+        burned = [2000.0, 2000.0]
+        eaten = [1500.0]
+        result = compute_weekly_deficit(burned, eaten, modifier=1.0)
+        # day1: 2000-1500=500, day2: 2000-0=2000, total=2500
+        assert result == 2500.0
+
+
+class TestWeeklyDeficitProgress:
+    def test_full_progress(self):
+        assert weekly_deficit_progress(3500.0, 3500.0) == 100.0
+
+    def test_capped_at_100(self):
+        assert weekly_deficit_progress(7000.0, 3500.0) == 100.0
+
+    def test_partial_progress(self):
+        assert weekly_deficit_progress(1750.0, 3500.0) == 50.0
+
+    def test_zero_target(self):
+        assert weekly_deficit_progress(100.0, 0.0) == 0.0
+
+
+class TestCalorieStatusFromProgress:
+    def test_green(self):
+        assert calorie_status_from_progress(80.0) == "green"
+        assert calorie_status_from_progress(70.0) == "green"
+
+    def test_yellow(self):
+        assert calorie_status_from_progress(50.0) == "yellow"
+        assert calorie_status_from_progress(20.0) == "yellow"
+
+    def test_red(self):
+        assert calorie_status_from_progress(10.0) == "red"
+        assert calorie_status_from_progress(0.0) == "red"
+
+
+class TestBuilderPhase2Integration:
+    @pytest.mark.asyncio
+    async def test_calories_uses_weekly_deficit(self):
+        session = AsyncMock()
+        # 7 days: high burn, low intake -> deficit
+        target_rows = [
+            make_daily_row(
+                date(2026, 2, 9) + timedelta(days=i),
+                nutrition_summary={"calories_total": 1500},
+                total_calories_burned=2800.0,
+            )
+            for i in range(7)
+        ]
+
+        async def _fetch(sess, start, end_exclusive, device_id=None):
+            if start >= date(2026, 2, 9):
+                return target_rows
+            return []
+
+        with patch("app.kernel.builders.connector.fetch_daily_rows", side_effect=_fetch):
+            env = await build_daily_summary(session, date(2026, 2, 15))
+
+        cals = next((s for s in env.signals if s.record_type == "calories_total"), None)
+        assert cals is not None
+        assert cals.priority == 2
+        assert cals.target_progress_pct is not None
+        assert cals.status in ("green", "yellow", "red")
+
+    @pytest.mark.asyncio
+    async def test_calories_surplus_yields_red(self):
+        session = AsyncMock()
+        # 7 days: low burn, high intake -> surplus (negative deficit)
+        target_rows = [
+            make_daily_row(
+                date(2026, 2, 9) + timedelta(days=i),
+                nutrition_summary={"calories_total": 3000},
+                total_calories_burned=1500.0,
+            )
+            for i in range(7)
+        ]
+
+        async def _fetch(sess, start, end_exclusive, device_id=None):
+            if start >= date(2026, 2, 9):
+                return target_rows
+            return []
+
+        with patch("app.kernel.builders.connector.fetch_daily_rows", side_effect=_fetch):
+            env = await build_daily_summary(session, date(2026, 2, 15))
+
+        cals = next((s for s in env.signals if s.record_type == "calories_total"), None)
+        assert cals is not None
+        assert cals.status == "red"

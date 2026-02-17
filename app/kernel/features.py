@@ -321,3 +321,44 @@ def tracking_status_from_coverage(coverage_7d: float) -> str:
     if coverage_7d >= 0.70:
         return "yellow"
     return "red"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Weekly deficit helpers
+# ---------------------------------------------------------------------------
+
+def compute_weekly_deficit(
+    calories_burned: list[float],
+    calories_eaten: list[float],
+    modifier: float,
+) -> float:
+    """Compute weekly deficit: Σ(burned * modifier - eaten) over 7-day series.
+
+    Returns 0.0 if lists are empty or mismatched. Padding: missing values
+    treated as 0 for that day.
+    """
+    if not calories_burned and not calories_eaten:
+        return 0.0
+    n = max(len(calories_burned), len(calories_eaten))
+    total = 0.0
+    for i in range(n):
+        burned = calories_burned[i] if i < len(calories_burned) else 0.0
+        eaten = calories_eaten[i] if i < len(calories_eaten) else 0.0
+        total += (burned * modifier) - eaten
+    return total
+
+
+def weekly_deficit_progress(actual_deficit: float, target_deficit: float) -> float:
+    """Progress toward weekly deficit goal. Capped at 100%."""
+    if target_deficit <= 0.0:
+        return 0.0
+    return min(100.0, (actual_deficit / target_deficit) * 100.0)
+
+
+def calorie_status_from_progress(progress_pct: float) -> str:
+    """Map weekly deficit progress to status: Red <20%, Yellow 20-70%, Green ≥70%."""
+    if progress_pct >= 70.0:
+        return "green"
+    if progress_pct >= 20.0:
+        return "yellow"
+    return "red"
