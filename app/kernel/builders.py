@@ -25,6 +25,8 @@ from app.kernel.models import (
     SignalCoverage,
     TimeRange,
 )
+from app.kernel.goals_config import get_goal, list_goals
+from app.kernel.models import PriorityStatus
 from app.kernel.signal_map import get_signal_config, list_signals
 
 
@@ -40,6 +42,51 @@ def _date_range_utc(start: date, end_exclusive: date, tz: ZoneInfo) -> tuple[dat
     s = datetime.combine(start, time.min, tzinfo=tz)
     e = datetime.combine(end_exclusive, time.min, tzinfo=tz)
     return _to_utc(s), _to_utc(e)
+
+
+def _build_priority_summary(signals: list[Signal]) -> dict[str, PriorityStatus] | None:
+    """Build per-priority status summary from goal-bearing signals."""
+    buckets: dict[int, list[Signal]] = {}
+    for sig in signals:
+        if sig.priority is not None:
+            buckets.setdefault(sig.priority, []).append(sig)
+
+    if not buckets:
+        return None
+
+    result: dict[str, PriorityStatus] = {}
+    for pri in sorted(buckets):
+        sigs = buckets[pri]
+        progresses = [s.target_progress_pct for s in sigs if s.target_progress_pct is not None]
+        avg_progress = sum(progresses) / len(progresses) if progresses else 0.0
+
+        statuses = [s.status for s in sigs if s.status]
+        if "red" in statuses:
+            overall_status = "red"
+        elif "yellow" in statuses:
+            overall_status = "yellow"
+        else:
+            overall_status = "green"
+
+        trends = [s.trend for s in sigs if s.trend]
+        if "up" in trends and "down" not in trends:
+            overall_trend = "up"
+        elif "down" in trends and "up" not in trends:
+            overall_trend = "down"
+        else:
+            overall_trend = "flat"
+
+        labels = [s.name for s in sigs]
+        msg = f"{', '.join(labels)}: {overall_status}"
+
+        result[f"P{pri}"] = PriorityStatus(
+            status=overall_status,
+            progress=round(avg_progress, 1),
+            trend=overall_trend,
+            message=msg,
+        )
+
+    return result
 
 
 async def _build_card(
@@ -96,6 +143,19 @@ async def _build_card(
         baseline_val = features.trailing_average(bl_vals) if bl_vals else None
         delta = features.compute_delta(current_val, baseline_val)
 
+        goal = get_goal(signal_name)
+        progress_pct = None
+        status = None
+        priority = None
+        trend = None
+        target = None
+        if goal:
+            target = goal.target_value
+            progress_pct = features.goal_progress_pct(current_val, goal.target_value, goal.target_type)
+            status = features.goal_status(progress_pct)
+            priority = goal.priority
+            trend = features.compute_trend(vals, bl_vals)
+
         signals.append(
             Signal(
                 name=signal_name.replace("_", " ").title(),
@@ -105,6 +165,11 @@ async def _build_card(
                 aggregation=cfg.agg,
                 baseline=baseline_val,
                 delta=delta,
+                target=target,
+                target_progress_pct=round(progress_pct, 1) if progress_pct is not None else None,
+                priority=priority,
+                status=status,
+                trend=trend,
             )
         )
 
@@ -131,6 +196,28 @@ async def _build_card(
             )
         )
 
+    # Virtual signal: tracking consistency (T1)
+    tc_goal = get_goal("tracking_consistency")
+    if tc_goal:
+        tc_value = features.tracking_consistency(target_rows, target_days)
+        tc_bl_value = features.tracking_consistency(baseline_rows, (target_start - baseline_start).days or 1) if baseline_rows else 0.0
+        tc_pct = features.goal_progress_pct(tc_value, tc_goal.target_value, tc_goal.target_type)
+        tc_trend = features.compute_trend([tc_value], [tc_bl_value]) if tc_bl_value > 0 else "flat"
+        signals.append(
+            Signal(
+                name="Tracking Consistency",
+                record_type="tracking_consistency",
+                value=round(tc_value, 2),
+                unit="ratio",
+                aggregation="avg",
+                target=tc_goal.target_value,
+                target_progress_pct=round(tc_pct, 1) if tc_pct is not None else None,
+                priority=tc_goal.priority,
+                status=features.goal_status(tc_pct),
+                trend=tc_trend,
+            )
+        )
+
     dates_present = [row["date"] for row in target_rows]
     partial_days = features.detect_partial_days(
         [datetime.combine(d, time.min, tzinfo=timezone.utc) for d in dates_present]
@@ -139,6 +226,9 @@ async def _build_card(
     missing_sources = [s for s in list_signals() if not target_series.get(s)]
     if missing_sources:
         warnings.append(f"Missing in target range: {', '.join(missing_sources)}")
+
+    # Build priority_summary from goal-bearing signals
+    priority_summary = _build_priority_summary(signals)
 
     n_signals = len([s for s in signals if s.value is not None])
     summary = f"{n_signals} signal(s) computed across {total_rows} records."
@@ -157,6 +247,7 @@ async def _build_card(
         ),
         warnings=warnings,
         drilldowns=drilldowns,
+        priority_summary=priority_summary,
     )
 
 

@@ -31,6 +31,10 @@ class Signal(BaseModel):
     baseline: float | None = None
     delta: float | None = None
     target: float | None = None
+    target_progress_pct: float | None = None
+    priority: int | None = None
+    status: str | None = None  # "red" | "yellow" | "green"
+    trend: str | None = None  # "up" | "down" | "flat"
 
 
 class EvidenceSource(BaseModel):
@@ -62,6 +66,13 @@ class Drilldown(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class PriorityStatus(BaseModel):
+    status: str  # "red" | "yellow" | "green"
+    progress: float  # 0–100
+    trend: str  # "up" | "down" | "flat"
+    message: str = ""
+
+
 class CardEnvelope(BaseModel):
     """Top-level card response object — always constructible."""
 
@@ -78,3 +89,4 @@ class CardEnvelope(BaseModel):
     coverage: Coverage = Field(default_factory=Coverage)
     warnings: list[str] = Field(default_factory=list)
     drilldowns: list[Drilldown] = Field(default_factory=list)
+    priority_summary: dict[str, PriorityStatus] | None = None

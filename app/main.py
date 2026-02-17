@@ -17,6 +17,8 @@ async def root() -> dict:
             "presets_detail": "/kernel/presets/{id}",
             "presets_run": "/kernel/presets/{id}/run",
             "cards": "/kernel/cards/{type}",
+            "goals": "/kernel/goals",
+            "goals_progress": "/kernel/goals/progress",
         },
     }
 

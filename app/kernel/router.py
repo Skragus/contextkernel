@@ -11,6 +11,7 @@ from app.auth import verify_api_key
 from app.config import settings
 from app.db import get_session
 from app.kernel import builders
+from app.kernel.goals_config import list_goals
 from app.kernel.models import CardEnvelope
 from app.kernel.presets import get_preset, list_presets
 
@@ -125,3 +126,66 @@ async def preset_run(
                 await builders.build_monthly_overview(session, start.year, start.month, tz_name, device_id)
             )
     return results
+
+
+# ---------------------------------------------------------------------------
+# /kernel/goals
+# ---------------------------------------------------------------------------
+
+
+@router.get("/goals")
+async def goals_list(
+    _: str = Depends(verify_api_key),
+) -> list[dict]:
+    """Return all configured goals (read-only, config-driven)."""
+    return [
+        {
+            "signal": g.signal_name,
+            "label": g.label,
+            "target_value": g.target_value,
+            "target_type": g.target_type,
+            "priority": g.priority,
+            "window_days": g.window_days,
+        }
+        for g in list_goals()
+    ]
+
+
+@router.get("/goals/progress")
+async def goals_progress(
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(verify_api_key),
+    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
+    tz: str = Query(default=None, description="Timezone"),
+    device_id: str | None = Query(default=None, description="Filter by device"),
+) -> dict:
+    """Compact goal progress by running a daily_summary for the given range.
+
+    Returns priority_summary + per-signal goal fields without full envelope overhead.
+    """
+    tz_name = tz or settings.default_tz
+    start = _parse_date(from_date, "from")
+
+    envelope = await builders.build_daily_summary(session, start, tz_name, device_id)
+
+    goal_signals = [
+        {
+            "signal": s.record_type,
+            "name": s.name,
+            "value": s.value,
+            "target": s.target,
+            "target_progress_pct": s.target_progress_pct,
+            "priority": s.priority,
+            "status": s.status,
+            "trend": s.trend,
+        }
+        for s in envelope.signals
+        if s.priority is not None
+    ]
+
+    return {
+        "date": start.isoformat(),
+        "priority_summary": envelope.priority_summary,
+        "goals": goal_signals,
+    }

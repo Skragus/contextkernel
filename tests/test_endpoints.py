@@ -92,6 +92,30 @@ class TestHealthEndpoint:
         assert resp.json() == {"status": "ok"}
 
 
+class TestGoalsEndpoints:
+    @pytest.mark.asyncio
+    async def test_goals_list(self, client):
+        resp = await client.get("/kernel/goals")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert len(data) == 3
+        signals = {g["signal"] for g in data}
+        assert "tracking_consistency" in signals
+        assert "calories_total" in signals
+        assert "steps_total" in signals
+
+    @pytest.mark.asyncio
+    async def test_goals_progress(self, client):
+        with patch("app.kernel.builders.connector.fetch_daily_rows", return_value=[]):
+            resp = await client.get("/kernel/goals/progress?from=2026-02-15&to=2026-02-15")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "goals" in data
+        assert "priority_summary" in data
+        assert "date" in data
+
+
 class TestAuth:
     @pytest.mark.asyncio
     async def test_401_when_key_required_and_missing(self, client):
