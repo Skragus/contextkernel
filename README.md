@@ -1,6 +1,6 @@
 # ContextKernel
 
-Standalone FastAPI service that reads telemetry from an existing Postgres `health_records` table, computes rollups + baselines + coverage, and returns **CardEnvelope v0** responses.
+Standalone FastAPI service that reads telemetry from Postgres `health_connect_daily` table, computes rollups + baselines + coverage, and returns **CardEnvelope v0** responses.
 
 ## Quick start
 
@@ -50,7 +50,7 @@ app/
   db.py                # SQLAlchemy async engine
   kernel/
     models.py          # CardEnvelope v0 Pydantic contract
-    record_type_map.py # RECORD_TYPE_CONFIG + DEFAULT_CONFIG
+    signal_map.py       # Signal config for health_connect_daily columns
     connector.py       # Async DB queries
     extractor.py       # JSON -> float extraction
     features.py        # Pure math (aggregate, baseline, delta, coverage)
@@ -71,7 +71,7 @@ tests/
 - One call to `/kernel/cards/{type}` returns exactly one `CardEnvelope`.
 - Missing or partial data never causes a 500 — returns valid envelopes with coverage + warnings.
 - No DB migrations, no caching, no ML.
-- `RECORD_TYPE_CONFIG` maps known types; `DEFAULT_CONFIG` handles unknowns via first-numeric heuristic.
+- Table: `health_connect_daily` (id, device_id, date, steps_total, body_metrics, heart_rate_summary, sleep_sessions, exercise_sessions, nutrition_summary).
 
 ## Auth (optional)
 

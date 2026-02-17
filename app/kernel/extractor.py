@@ -1,34 +1,17 @@
-"""Extract numeric values from health_records rows using RECORD_TYPE_CONFIG."""
+"""Extract numeric values from health_connect_daily rows."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date
 from typing import Any
 
-from app.kernel.record_type_map import get_config
+from app.kernel.signal_map import SignalConfig, get_signal_config, list_signals
 
 
-def _first_numeric(data: Any) -> float | None:
-    """Walk a dict/list and return the first numeric value found."""
-    if isinstance(data, (int, float)) and not isinstance(data, bool):
-        return float(data)
-    if isinstance(data, dict):
-        for v in data.values():
-            result = _first_numeric(v)
-            if result is not None:
-                return result
-    if isinstance(data, (list, tuple)):
-        for item in data:
-            result = _first_numeric(item)
-            if result is not None:
-                return result
-    return None
-
-
-def _resolve_key(data: Any, key: str) -> Any:
-    """Resolve a dot-path key like 'foo.bar' or 'list.0.field' in nested dicts/lists."""
+def _resolve_path(data: Any, path: str) -> Any:
+    """Resolve dot-path like 'weight_kg' or '0.duration_minutes' in dicts/lists."""
     current = data
-    for part in key.split("."):
+    for part in path.split("."):
         if isinstance(current, dict):
             current = current.get(part)
         elif isinstance(current, (list, tuple)):
@@ -41,53 +24,54 @@ def _resolve_key(data: Any, key: str) -> Any:
     return current
 
 
-def extract_value(record: dict[str, Any]) -> float | None:
-    """Extract a single numeric value from a health_records row.
+def _to_float(raw: Any) -> float | None:
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return float(raw)
+    if isinstance(raw, str):
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+    return None
 
-    Uses RECORD_TYPE_CONFIG for known types, falls back to first-numeric heuristic.
-    Returns None on any failure — never raises.
-    """
+
+def extract_signal(row: dict[str, Any], config: SignalConfig) -> float | None:
+    """Extract a single signal value from a health_connect_daily row."""
     try:
-        rt = record.get("record_type", "")
-        cfg = get_config(rt)
-        data = record.get("data")
-
-        if data is None:
-            return None
-
-        # If data is stored as a raw string, skip (shouldn't happen with jsonb)
-        if not isinstance(data, dict):
-            return _first_numeric(data)
-
-        if cfg.value_key is not None:
-            raw = _resolve_key(data, cfg.value_key)
-            if raw is None:
-                return _first_numeric(data)
-            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-                return float(raw)
-            # Try to parse string-encoded numbers
-            if isinstance(raw, str):
-                try:
-                    return float(raw)
-                except ValueError:
-                    return None
-            return None
-
-        # Fallback: first numeric value in the dict
-        return _first_numeric(data)
+        col_val = row.get(config.column)
+        if config.path is None:
+            raw = col_val
+        else:
+            if col_val is None or not isinstance(col_val, (dict, list)):
+                return None
+            raw = _resolve_path(col_val, config.path)
+        return _to_float(raw)
     except Exception:
         return None
 
 
-def extract_batch(
-    records: list[dict[str, Any]],
-) -> list[tuple[datetime, float]]:
-    """Extract (timestamp, value) pairs, skipping rows where extraction fails."""
-    pairs: list[tuple[datetime, float]] = []
-    for rec in records:
-        val = extract_value(rec)
+def extract_signals_from_row(row: dict[str, Any]) -> dict[str, float]:
+    """Extract all configured signals from one row. Skips missing values."""
+    out: dict[str, float] = {}
+    for name in list_signals():
+        cfg = get_signal_config(name)
+        if cfg is None:
+            continue
+        val = extract_signal(row, cfg)
         if val is not None:
-            ts = rec.get("start_date")
-            if ts is not None:
-                pairs.append((ts, val))
-    return pairs
+            out[name] = val
+    return out
+
+
+def extract_signal_series(
+    rows: list[dict[str, Any]],
+) -> dict[str, list[float]]:
+    """Extract per-signal value lists from rows. Rows ordered by date."""
+    series: dict[str, list[float]] = {name: [] for name in list_signals()}
+    for row in rows:
+        vals = extract_signals_from_row(row)
+        for name, v in vals.items():
+            series[name].append(v)
+    return series

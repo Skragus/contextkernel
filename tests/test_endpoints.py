@@ -20,7 +20,7 @@ class TestCardsEndpoint:
 
     @pytest.mark.asyncio
     async def test_daily_summary_200(self, client):
-        with patch("app.kernel.builders.connector.fetch_records", return_value=[]):
+        with patch("app.kernel.builders.connector.fetch_daily_rows", return_value=[]):
             resp = await client.get("/kernel/cards/daily_summary?from=2026-02-15&to=2026-02-15")
         assert resp.status_code == 200
         body = resp.json()
@@ -29,14 +29,14 @@ class TestCardsEndpoint:
 
     @pytest.mark.asyncio
     async def test_weekly_overview_200(self, client):
-        with patch("app.kernel.builders.connector.fetch_records", return_value=[]):
+        with patch("app.kernel.builders.connector.fetch_daily_rows", return_value=[]):
             resp = await client.get("/kernel/cards/weekly_overview?from=2026-02-09&to=2026-02-15")
         assert resp.status_code == 200
         assert resp.json()["card_type"] == "weekly_overview"
 
     @pytest.mark.asyncio
     async def test_monthly_overview_200(self, client):
-        with patch("app.kernel.builders.connector.fetch_records", return_value=[]):
+        with patch("app.kernel.builders.connector.fetch_daily_rows", return_value=[]):
             resp = await client.get("/kernel/cards/monthly_overview?from=2026-02-01&to=2026-02-28")
         assert resp.status_code == 200
         assert resp.json()["card_type"] == "monthly_overview"
@@ -68,7 +68,7 @@ class TestPresetsEndpoints:
 
     @pytest.mark.asyncio
     async def test_preset_run(self, client):
-        with patch("app.kernel.builders.connector.fetch_records", return_value=[]):
+        with patch("app.kernel.builders.connector.fetch_daily_rows", return_value=[]):
             resp = await client.get(
                 "/kernel/presets/daily_brief/run?from=2026-02-15&to=2026-02-15"
             )

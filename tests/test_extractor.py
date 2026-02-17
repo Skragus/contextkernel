@@ -1,134 +1,92 @@
-"""Tests for the value extractor."""
+"""Tests for the value extractor (health_connect_daily)."""
 
-from datetime import datetime, timezone
+from datetime import date
 
-from app.kernel.extractor import extract_batch, extract_value
+from app.kernel.extractor import extract_signal, extract_signals_from_row, extract_signal_series
+from app.kernel.signal_map import get_signal_config
 
 
-class TestExtractValue:
-    def test_known_type_with_value_key(self):
-        row = {"record_type": "step_count", "data": {"value": 8500}}
-        assert extract_value(row) == 8500.0
+class TestExtractSignal:
+    def test_typed_column_steps_total(self):
+        row = {"steps_total": 2530, "device_id": "x", "date": date(2026, 2, 16)}
+        cfg = get_signal_config("steps_total")
+        assert cfg is not None
+        assert extract_signal(row, cfg) == 2530.0
 
-    def test_known_type_string_value(self):
-        row = {"record_type": "heart_rate", "data": {"value": "72.5"}}
-        assert extract_value(row) == 72.5
+    def test_jsonb_body_metrics_weight(self):
+        row = {"body_metrics": {"weight_kg": 130.16, "body_fat_percentage": 40.9}}
+        cfg = get_signal_config("weight_kg")
+        assert cfg is not None
+        assert extract_signal(row, cfg) == 130.16
 
-    def test_unknown_type_first_numeric(self):
-        row = {"record_type": "something_new", "data": {"foo": "bar", "metric": 42}}
-        assert extract_value(row) == 42.0
+    def test_jsonb_heart_rate_summary(self):
+        row = {"heart_rate_summary": {"avg_hr": 76, "max_hr": 109, "min_hr": 58, "resting_hr": 76}}
+        cfg = get_signal_config("avg_hr")
+        assert cfg is not None
+        assert extract_signal(row, cfg) == 76.0
 
-    def test_nested_value(self):
-        row = {"record_type": "something_new", "data": {"nested": {"deep": 3.14}}}
-        assert extract_value(row) == 3.14
-
-    def test_none_data(self):
-        row = {"record_type": "step_count", "data": None}
-        assert extract_value(row) is None
-
-    def test_empty_dict(self):
-        row = {"record_type": "step_count", "data": {}}
-        assert extract_value(row) is None
-
-    def test_no_numeric_anywhere(self):
-        row = {"record_type": "unknown", "data": {"a": "text", "b": "more"}}
-        assert extract_value(row) is None
-
-    def test_boolean_not_extracted(self):
-        row = {"record_type": "unknown", "data": {"flag": True, "val": 5}}
-        assert extract_value(row) == 5.0
-
-    def test_missing_record_type(self):
-        row = {"data": {"value": 10}}
-        assert extract_value(row) == 10.0
-
-    def test_corrupt_data_no_crash(self):
-        row = {"record_type": "step_count", "data": object()}
-        result = extract_value(row)
-        assert result is None
-
-    def test_nested_dot_path(self):
-        """Config path like 'heart_rate_summary.avg_bpm' into a daily blob."""
+    def test_jsonb_sleep_sessions_array(self):
         row = {
-            "record_type": "heart_rate_avg",
-            "data": {"heart_rate_summary": {"avg_bpm": 72, "resting_bpm": 58}},
+            "sleep_sessions": [
+                {"start_time": "2026-02-16T02:40:00Z", "end_time": "2026-02-16T11:10:00Z", "duration_minutes": 510}
+            ]
         }
-        assert extract_value(row) == 72.0
+        cfg = get_signal_config("sleep_duration_minutes")
+        assert cfg is not None
+        assert extract_signal(row, cfg) == 510.0
 
-    def test_list_index_path(self):
-        """Config path like 'sleep_sessions.0.duration_minutes'."""
+    def test_missing_column(self):
+        row = {}
+        cfg = get_signal_config("steps_total")
+        assert cfg is not None
+        assert extract_signal(row, cfg) is None
+
+    def test_missing_jsonb_path(self):
+        row = {"body_metrics": {}}
+        cfg = get_signal_config("weight_kg")
+        assert cfg is not None
+        assert extract_signal(row, cfg) is None
+
+    def test_empty_sleep_sessions(self):
+        row = {"sleep_sessions": []}
+        cfg = get_signal_config("sleep_duration_minutes")
+        assert cfg is not None
+        assert extract_signal(row, cfg) is None
+
+
+class TestExtractSignalsFromRow:
+    def test_extracts_all_present(self):
         row = {
-            "record_type": "sleep_duration",
-            "data": {
-                "sleep_sessions": [
-                    {"duration_minutes": 450, "efficiency": 88},
-                ]
-            },
+            "steps_total": 2530,
+            "body_metrics": {"weight_kg": 130.16, "body_fat_percentage": 40.9},
+            "heart_rate_summary": {"avg_hr": 76, "max_hr": 109, "min_hr": 58, "resting_hr": 76},
+            "sleep_sessions": [{"duration_minutes": 510}],
         }
-        assert extract_value(row) == 450.0
+        vals = extract_signals_from_row(row)
+        assert vals["steps_total"] == 2530.0
+        assert vals["weight_kg"] == 130.16
+        assert vals["avg_hr"] == 76.0
+        assert vals["sleep_duration_minutes"] == 510.0
 
-    def test_list_index_out_of_bounds_falls_back(self):
-        """Empty list should not crash — falls back to first-numeric."""
-        row = {
-            "record_type": "sleep_duration",
-            "data": {"sleep_sessions": [], "some_number": 99},
-        }
-        assert extract_value(row) == 99.0
-
-    def test_deep_nested_blob_path(self):
-        """Config path like 'sleep_sessions.0.stages.deep_minutes'."""
-        row = {
-            "record_type": "sleep_deep",
-            "data": {
-                "sleep_sessions": [
-                    {"stages": {"deep_minutes": 125, "rem_minutes": 80}},
-                ]
-            },
-        }
-        assert extract_value(row) == 125.0
-
-    def test_top_level_numeric_path(self):
-        """Config path like 'steps_total' — top-level key in blob."""
-        row = {
-            "record_type": "steps_total",
-            "data": {"steps_total": 8432, "other": "stuff"},
-        }
-        assert extract_value(row) == 8432.0
-
-    def test_nutrition_nested_path(self):
-        row = {
-            "record_type": "calories_consumed",
-            "data": {
-                "nutrition_summary": {
-                    "calories_consumed": 2450,
-                    "protein_g": 145,
-                }
-            },
-        }
-        assert extract_value(row) == 2450.0
+    def test_skips_missing(self):
+        row = {"steps_total": 100}
+        vals = extract_signals_from_row(row)
+        assert "steps_total" in vals
+        assert vals["steps_total"] == 100.0
+        assert "weight_kg" not in vals
 
 
-class TestExtractBatch:
+class TestExtractSignalSeries:
     def test_basic(self):
-        ts = datetime(2026, 2, 15, 12, 0, tzinfo=timezone.utc)
         rows = [
-            {"record_type": "step_count", "start_date": ts, "data": {"value": 100}},
-            {"record_type": "step_count", "start_date": ts, "data": {"value": 200}},
+            {"date": date(2026, 2, 15), "steps_total": 100, "body_metrics": {}, "heart_rate_summary": {}, "sleep_sessions": [], "exercise_sessions": [], "nutrition_summary": {}},
+            {"date": date(2026, 2, 16), "steps_total": 200, "body_metrics": {}, "heart_rate_summary": {"avg_hr": 72}, "sleep_sessions": [], "exercise_sessions": [], "nutrition_summary": {}},
         ]
-        pairs = extract_batch(rows)
-        assert len(pairs) == 2
-        assert pairs[0] == (ts, 100.0)
-        assert pairs[1] == (ts, 200.0)
-
-    def test_skips_bad_rows(self):
-        ts = datetime(2026, 2, 15, 12, 0, tzinfo=timezone.utc)
-        rows = [
-            {"record_type": "step_count", "start_date": ts, "data": {"value": 100}},
-            {"record_type": "step_count", "start_date": ts, "data": None},
-            {"record_type": "step_count", "start_date": ts, "data": {"value": 300}},
-        ]
-        pairs = extract_batch(rows)
-        assert len(pairs) == 2
+        series = extract_signal_series(rows)
+        assert series["steps_total"] == [100.0, 200.0]
+        assert series["avg_hr"] == [72.0]
 
     def test_empty(self):
-        assert extract_batch([]) == []
+        series = extract_signal_series([])
+        for name, vals in series.items():
+            assert vals == []

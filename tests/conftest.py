@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -71,19 +71,23 @@ async def client(override_session):
         yield ac
 
 
-def make_row(
-    record_type: str,
-    value: float,
-    ts: datetime | None = None,
+def make_daily_row(
+    d: date,
+    steps_total: int = 0,
+    body_metrics: dict | None = None,
+    heart_rate_summary: dict | None = None,
+    sleep_sessions: list | None = None,
     row_id: int = 1,
 ) -> dict[str, Any]:
-    """Helper to build a fake health_records row dict."""
-    if ts is None:
-        ts = datetime(2026, 2, 15, 12, 0, tzinfo=timezone.utc)
+    """Helper to build a fake health_connect_daily row dict."""
     return {
         "id": row_id,
-        "record_type": record_type,
-        "start_date": ts,
-        "end_date": ts,
-        "data": {"value": value},
+        "device_id": "test-device",
+        "date": d,
+        "steps_total": steps_total,
+        "body_metrics": body_metrics or {},
+        "heart_rate_summary": heart_rate_summary or {},
+        "sleep_sessions": sleep_sessions or [],
+        "exercise_sessions": [],
+        "nutrition_summary": {},
     }
