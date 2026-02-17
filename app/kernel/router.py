@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,14 @@ def _parse_date(value: str, name: str) -> date:
         return date.fromisoformat(value)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid date for '{name}': {value}")
+
+
+def _parse_date_or_latest(value: str, name: str, tz_name: str) -> date:
+    """Parse date string, or 'latest' for today in tz."""
+    if str(value).lower() == "latest":
+        tz = ZoneInfo(tz_name)
+        return datetime.now(tz).date()
+    return _parse_date(value, name)
 
 
 # ---------------------------------------------------------------------------
@@ -155,17 +164,18 @@ async def goals_list(
 async def goals_progress(
     session: AsyncSession = Depends(get_session),
     _: str = Depends(verify_api_key),
-    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
-    to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
+    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD) or 'latest' for today"),
+    to_date: str = Query(default="latest", alias="to", description="End date (ignored; use from)"),
     tz: str = Query(default=None, description="Timezone"),
     device_id: str | None = Query(default=None, description="Filter by device"),
 ) -> dict:
-    """Compact goal progress by running a daily_summary for the given range.
+    """Compact goal progress by running a daily_summary for the given date.
 
+    Use from=latest for today's progress (uses latest intraday data when available).
     Returns priority_summary + per-signal goal fields without full envelope overhead.
     """
     tz_name = tz or settings.default_tz
-    start = _parse_date(from_date, "from")
+    start = _parse_date_or_latest(from_date, "from", tz_name)
 
     envelope = await builders.build_daily_summary(session, start, tz_name, device_id)
 

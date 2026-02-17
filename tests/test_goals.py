@@ -207,7 +207,7 @@ class TestBuilderGoalIntegration:
             for i in range(1, 8)
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 15):
                 return target_rows
             return baseline_rows
@@ -237,7 +237,7 @@ class TestBuilderGoalIntegration:
             for i in range(7)
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 9):
                 return target_rows
             return []
@@ -260,7 +260,7 @@ class TestBuilderGoalIntegration:
             )
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 15):
                 return target_rows
             return []
@@ -284,7 +284,7 @@ class TestBuilderGoalIntegration:
             )
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 15):
                 return target_rows
             return []
@@ -316,7 +316,7 @@ class TestBuilderGoalIntegration:
             )
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 15):
                 return target_rows
             return []
@@ -434,7 +434,7 @@ class TestBuilderPhase1Integration:
             )
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 15):
                 return target_rows
             return []
@@ -462,7 +462,7 @@ class TestBuilderPhase1Integration:
             for i in range(7)
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 9):
                 return target_rows
             return []
@@ -585,7 +585,7 @@ class TestBuilderPhase2Integration:
             for i in range(7)
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 9):
                 return target_rows
             return []
@@ -613,7 +613,7 @@ class TestBuilderPhase2Integration:
             for i in range(7)
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 9):
                 return target_rows
             return []
@@ -733,7 +733,7 @@ class TestBuilderPhase3Integration:
             for i in range(7)
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 9):
                 return target_rows
             return baseline_rows
@@ -758,7 +758,7 @@ class TestBuilderPhase3Integration:
             for i in range(7)
         ]
 
-        async def _fetch(sess, start, end_exclusive, device_id=None):
+        async def _fetch(sess, start, end_exclusive, device_id=None, **kwargs):
             if start >= date(2026, 2, 9):
                 return target_rows
             return []

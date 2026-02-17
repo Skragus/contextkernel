@@ -114,6 +114,19 @@ class TestGoalsEndpoints:
         assert "goals" in data
         assert "priority_summary" in data
         assert "date" in data
+        assert data["date"] == "2026-02-15"
+
+    @pytest.mark.asyncio
+    async def test_goals_progress_latest(self, client):
+        with patch("app.kernel.builders.connector.fetch_daily_rows", return_value=[]):
+            resp = await client.get("/kernel/goals/progress?from=latest")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "goals" in data
+        assert "priority_summary" in data
+        assert "date" in data
+        from datetime import date
+        assert data["date"] == date.today().isoformat()
 
 
 class TestAuth:

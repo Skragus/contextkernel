@@ -107,7 +107,11 @@ async def _build_card(
     if range_start > datetime.now(timezone.utc):
         warnings.append("Requested range is entirely in the future.")
 
-    target_rows = await connector.fetch_daily_rows(session, target_start, target_end_exclusive, device_id)
+    today_in_tz = datetime.now(tz).date()
+    use_intraday = today_in_tz if target_start <= today_in_tz < target_end_exclusive else None
+    target_rows = await connector.fetch_daily_rows(
+        session, target_start, target_end_exclusive, device_id, use_intraday_for_today=use_intraday
+    )
 
     if not target_rows:
         warnings.append("No data found in the requested range.")
@@ -120,7 +124,10 @@ async def _build_card(
             coverage=Coverage(missing_sources=[], partial_days=[]),
         )
 
-    baseline_rows = await connector.fetch_daily_rows(session, baseline_start, target_start, device_id)
+    use_intraday_baseline = today_in_tz if baseline_start <= today_in_tz < target_start else None
+    baseline_rows = await connector.fetch_daily_rows(
+        session, baseline_start, target_start, device_id, use_intraday_for_today=use_intraday_baseline
+    )
 
     target_series = extractor.extract_signal_series(target_rows)
     baseline_series = extractor.extract_signal_series(baseline_rows)
