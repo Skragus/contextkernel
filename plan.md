@@ -283,3 +283,4 @@ Routes:
   * `/kernel/presets`
   * `/kernel/cards/daily_summary?from=2026-02-15&to=2026-02-15`
   * `/kernel/presets/daily_brief/run?...`
+

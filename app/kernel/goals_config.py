@@ -33,7 +33,7 @@ GOALS_BY_SIGNAL: dict[str, GoalDefinition] = {
     # T2 – calorie deficit
     "calories_total": GoalDefinition(
         signal_name="calories_total",
-        target_value=2000.0,
+        target_value=2300.0,
         target_type="maximum",
         priority=2,
         window_days=1,

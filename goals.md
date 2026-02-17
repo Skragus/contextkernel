@@ -196,3 +196,31 @@ Because the detailed sets/reps are squeezed into a **free-text `notes` field**, 
     `strength_session = true`”.
 - Longer-term: if we want richer strength metrics, introduce a dedicated Hevy/strength
   connector and schema; this stays **out of scope** for the current kernel MVP.
+
+
+  kernel/cards/daily_summary?from=2026-02-15&to=2026-02-15" \
+  -H "X-API-Key: YOUR_KEY"
+  
+  kernel/cards/weekly_overview?from=2026-02-09&to=2026-02-15" \
+  -H "X-API-Key: YOUR_KEY"
+
+  kernel/cards/monthly_overview?from=2026-02-01&to=2026-02-28" \
+  -H "X-API-Key: YOUR_KEY"
+
+  kernel/presets" \
+  -H "X-API-Key: YOUR_KEY"
+
+ kernel/presets/daily_brief/run?from=2026-02-15&to=2026-02-15" \
+  -H "X-API-Key: YOUR_KEY"
+
+kernel/presets/daily_brief/run?from=2026-02-15&to=2026-02-15" \
+  -H "X-API-Key: YOUR_KEY"
+
+kernel/goals" \
+  -H "X-API-Key: YOUR_KEY"
+
+kernel/goals/progress?from=2026-02-15&to=2026-02-15" \
+  -H "X-API-Key: YOUR_KEY"
+
+kernel/cards/daily_summary?from=2026-02-15&to=2026-02-15" \
+  -H "X-API-Key: YOUR_KEY" | jq '.signals[] | select(.priority != null)'
