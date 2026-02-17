@@ -29,7 +29,6 @@ async def get_signals_catalog(
                 "age": settings.user_age,
                 "sex": settings.user_sex,
                 "height_cm": settings.user_height_cm,
-                "weight_kg": settings.user_weight_kg,
                 "tracking_start_date": settings.goals_tracking_start_date,
             },
             "defaults": {
