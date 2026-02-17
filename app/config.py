@@ -16,10 +16,12 @@ class Settings(BaseSettings):
     goals_tracking_recent_days: int = 7  # Recent reliability window
     goals_tracking_start_date: str | None = None  # ISO date string, e.g. "2026-02-09" (overrides DB query)
 
-    # Phase 2: Calories weekly deficit config
-    goals_calorie_deficit_target: float = 500.0  # kcal/day target (3500/week)
-    goals_steps_to_kcal: float = 0.04  # kcal per step (activity above sedentary)
-    goals_activity_modifier: float = 0.5  # Conservative factor for earned activity calories (on top of BMR)
+    # Phase 2: Calories (daily goal from rolling 7d window, never use total_calories_burned)
+    goals_calorie_deficit_target: float = 500.0  # kcal/day baseline (3500/week)
+    goals_surplus_recovery_factor: float = 0.05  # When behind, deficit for remaining days +5%
+    goals_tdee_activity_factor: float = 1.2  # TDEE = BMR × this (sedentary baseline)
+    goals_steps_to_kcal: float = 0.04  # kcal per step (activity above TDEE)
+    goals_activity_modifier: float = 0.5  # Conservative factor for earned activity (on top of TDEE)
 
     # Phase 3: Steps gated ramp config
     goals_steps_floor: float = 3500.0  # Minimum acceptable 14d avg

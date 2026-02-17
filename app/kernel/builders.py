@@ -217,24 +217,29 @@ async def _build_card(
             drilldowns.append(Drilldown(label=f"Signal: {signal_name}", type="records", params={"signal": signal_name, "from": target_start.isoformat(), "to": target_end_exclusive.isoformat()}))
             continue
 
-        # Phase 2: calories_total uses weekly deficit (BMR + steps-based activity - eaten)
-        calories_weekly_deficit: float | None = None
+        # Phase 2: calories_total uses daily calorie goal from rolling 7-day window
+        calories_daily_goal: float | None = None
+        calories_eaten_today: float | None = None
         if signal_name == "calories_total" and goal:
             all_rows = (baseline_rows or []) + (target_rows or [])
             rows_7d = all_rows[-7:] if all_rows else []
-            deficit_target = settings.goals_calorie_deficit_target * 7.0  # weekly goal (kcal)
-            actual_deficit = features.compute_weekly_deficit_from_rows(
-                rows_7d,
-                steps_to_kcal=settings.goals_steps_to_kcal,
-                activity_modifier=settings.goals_activity_modifier,
-                age_years=settings.user_age,
-                sex=settings.user_sex,
+            deficit_target_weekly = settings.goals_calorie_deficit_target * 7.0
+            daily_goal, eaten_today, actual_deficit, progress_pct, status = (
+                features.compute_daily_calorie_goal_from_rows(
+                    rows_7d,
+                    deficit_target_weekly=deficit_target_weekly,
+                    surplus_recovery_factor=settings.goals_surplus_recovery_factor,
+                    tdee_activity_factor=settings.goals_tdee_activity_factor,
+                    steps_to_kcal=settings.goals_steps_to_kcal,
+                    activity_modifier=settings.goals_activity_modifier,
+                    age_years=settings.user_age,
+                    sex=settings.user_sex,
+                )
             )
-            calories_weekly_deficit = actual_deficit
-            progress_pct = features.weekly_deficit_progress(actual_deficit, deficit_target)
-            status = features.calorie_status_from_progress(progress_pct)
+            calories_daily_goal = daily_goal
+            calories_eaten_today = eaten_today
             priority = goal.priority
-            target = deficit_target
+            target = daily_goal  # daily goal kcal
             trend = features.compute_trend(vals, bl_vals)
         elif goal:
             target = goal.target_value
@@ -243,15 +248,29 @@ async def _build_card(
             priority = goal.priority
             trend = features.compute_trend(vals, bl_vals)
 
-        # Phase 2 calories: value = actual weekly deficit (kcal), same units as target
-        display_val = round(calories_weekly_deficit, 1) if calories_weekly_deficit is not None else current_val
+        # Phase 2 calories: value = eaten today, target = daily calorie goal (from rolling 7d)
+        display_val = round(calories_eaten_today, 1) if calories_eaten_today is not None else (round(calories_daily_goal, 1) if calories_daily_goal is not None else current_val)
+        sig_name = signal_name.replace("_", " ").title()
+        sig_unit = cfg.unit
+        sig_interpretation: str | None = None
+        if calories_daily_goal is not None:
+            sig_name = "Daily Calorie Goal"
+            sig_unit = "kcal"
+            eaten_str = f"Ate {round(calories_eaten_today):.0f}." if calories_eaten_today is not None else "No intake logged today."
+            if calories_eaten_today is not None:
+                if calories_eaten_today <= calories_daily_goal:
+                    sig_interpretation = f"Goal: {round(calories_daily_goal):.0f} kcal. {eaten_str} Under budget."
+                else:
+                    sig_interpretation = f"Goal: {round(calories_daily_goal):.0f} kcal. {eaten_str} Over budget."
+            else:
+                sig_interpretation = f"Goal: {round(calories_daily_goal):.0f} kcal today (rolling 7-day)."
 
         signals.append(
             Signal(
-                name=signal_name.replace("_", " ").title(),
+                name=sig_name,
                 record_type=signal_name,
                 value=display_val,
-                unit=cfg.unit,
+                unit=sig_unit,
                 aggregation=cfg.agg,
                 baseline=baseline_val,
                 delta=delta,
@@ -260,6 +279,7 @@ async def _build_card(
                 priority=priority,
                 status=status,
                 trend=trend,
+                interpretation=sig_interpretation,
             )
         )
 

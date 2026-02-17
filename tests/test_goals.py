@@ -9,6 +9,7 @@ import pytest
 
 from app.kernel.features import (
     calorie_status_from_progress,
+    compute_daily_calorie_goal_from_rows,
     compute_dynamic_steps_target,
     compute_steps_baseline,
     compute_trend,
@@ -527,16 +528,17 @@ class TestComputeWeeklyDeficitFromRows:
         ]
         result = compute_weekly_deficit_from_rows(
             rows,
+            tdee_activity_factor=1.2,
             steps_to_kcal=0.04,
             activity_modifier=0.5,
             age_years=30,
             sex="male",
         )
-        # BMR ~2360, activity 10k*0.04*0.5=200, burn ~2560. Eaten 2000. Deficit 560/day * 7 = 3920
+        # BMR ~2360, TDEE 2360*1.2~2832, activity 10k*0.04*0.5=200, burn ~3032. Eaten 2000. Deficit ~1032/day * 7 > 3500
         assert result > 3500
 
     def test_empty_rows_zero(self):
-        assert compute_weekly_deficit_from_rows([], 0.04, 0.5) == 0.0
+        assert compute_weekly_deficit_from_rows([], 1.2, 0.04, 0.5) == 0.0
 
 
 class TestWeeklyDeficitProgress:
@@ -571,8 +573,8 @@ class TestBuilderPhase2Integration:
     @pytest.mark.asyncio
     async def test_calories_uses_weekly_deficit(self):
         session = AsyncMock()
-        # BMR + steps-based activity - eaten. BMR ~2360 (130kg, 193cm), 10k steps * 0.04 * 0.5 = 200 activity
-        # burn ~2560, eaten 1500 -> deficit ~1060/day -> green
+        # TDEE = BMR×1.2 ~2832 (130kg, 193cm, 30yo), +10k steps*0.04*0.5=200 activity -> burn ~3032
+        # eaten 1500 -> deficit ~1532/day -> green
         target_rows = [
             make_daily_row(
                 date(2026, 2, 9) + timedelta(days=i),
@@ -593,6 +595,8 @@ class TestBuilderPhase2Integration:
 
         cals = next((s for s in env.signals if s.record_type == "calories_total"), None)
         assert cals is not None
+        assert cals.name == "Daily Calorie Goal"
+        assert cals.target is not None and 800 <= cals.target <= 5000  # daily goal kcal
         assert cals.priority == 2
         assert cals.target_progress_pct is not None
         assert cals.status in ("green", "yellow", "red")

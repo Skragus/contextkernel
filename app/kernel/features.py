@@ -366,6 +366,7 @@ def _activity_kcal_from_steps(steps: float, steps_to_kcal: float, activity_modif
 
 def compute_weekly_deficit_from_rows(
     rows: list[dict],
+    tdee_activity_factor: float,
     steps_to_kcal: float,
     activity_modifier: float,
     age_years: int | None = None,
@@ -373,33 +374,109 @@ def compute_weekly_deficit_from_rows(
 ) -> float:
     """Compute weekly deficit from date-aligned rows.
 
-    Model: daily burn = BMR + (steps * steps_to_kcal * activity_modifier)
-    Deficit = burn - eaten. Uses height, weight, steps from each row; BMR from
-    body_metrics.bmr_kcal or Mifflin-St Jeor; activity from steps only.
+    Model: TDEE = BMR × tdee_activity_factor (sedentary ~1.2)
+           daily burn = TDEE + (steps * steps_to_kcal * activity_modifier)
+           deficit = burn - eaten
+
+    Never uses total_calories_burned. BMR from body_metrics or Mifflin-St Jeor.
     """
     total = 0.0
     for row in rows:
         raw = row.get("raw_data") or {}
-        bmr = _bmr_from_row(raw, age_years, sex)
-        if bmr is None or bmr <= 0:
-            bmr = 1500.0  # fallback
-        steps_val = 0.0
-        if "steps_total" in raw and raw["steps_total"] is not None:
-            try:
-                steps_val = float(raw["steps_total"])
-            except (TypeError, ValueError):
-                pass
-        activity = _activity_kcal_from_steps(steps_val, steps_to_kcal, activity_modifier)
-        burned = bmr + activity
-        eaten = 0.0
-        nut = raw.get("nutrition_summary")
-        if isinstance(nut, dict) and nut.get("calories_total") is not None:
-            try:
-                eaten = float(nut["calories_total"])
-            except (TypeError, ValueError):
-                pass
+        burned = _burn_for_row(raw, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex)
+        eaten = _eaten_for_row(raw)
         total += burned - eaten
     return total
+
+
+def _burn_for_row(
+    raw: dict,
+    tdee_activity_factor: float,
+    steps_to_kcal: float,
+    activity_modifier: float,
+    age_years: int | None,
+    sex: str | None,
+) -> float:
+    """Single-day burn = TDEE + activity. Never uses total_calories_burned."""
+    bmr = _bmr_from_row(raw, age_years, sex)
+    if bmr is None or bmr <= 0:
+        bmr = 1500.0
+    tdee = bmr * tdee_activity_factor
+    steps_val = 0.0
+    if "steps_total" in raw and raw["steps_total"] is not None:
+        try:
+            steps_val = float(raw["steps_total"])
+        except (TypeError, ValueError):
+            pass
+    activity = _activity_kcal_from_steps(steps_val, steps_to_kcal, activity_modifier)
+    return tdee + activity
+
+
+def _eaten_for_row(raw: dict) -> float:
+    """Calories eaten from row. Returns 0 if missing."""
+    nut = raw.get("nutrition_summary")
+    if isinstance(nut, dict) and nut.get("calories_total") is not None:
+        try:
+            return float(nut["calories_total"])
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
+def compute_daily_calorie_goal_from_rows(
+    rows: list[dict],
+    deficit_target_weekly: float,
+    surplus_recovery_factor: float,
+    tdee_activity_factor: float,
+    steps_to_kcal: float,
+    activity_modifier: float,
+    age_years: int | None = None,
+    sex: str | None = None,
+) -> tuple[float, float | None, float, float, str]:
+    """Compute daily calorie goal from rolling 7-day window.
+
+    Daily goal = burn_today - (deficit_needed_remaining / days_remaining).
+    When behind (surplus so far), deficit for remaining days increases by surplus_recovery_factor (e.g. 5%).
+
+    Returns: (daily_goal_kcal, eaten_today_or_none, weekly_deficit_actual, progress_pct, status)
+    """
+    if not rows:
+        return (2000.0, None, 0.0, 0.0, "red")  # fallback
+
+    weekly_deficit = compute_weekly_deficit_from_rows(
+        rows, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex
+    )
+
+    # Last row = "today" (or most recent)
+    last_raw = rows[-1].get("raw_data") or {}
+    burn_today = _burn_for_row(last_raw, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex)
+    eaten_today: float | None = None
+    eaten_val = _eaten_for_row(last_raw)
+    if eaten_val > 0:
+        eaten_today = eaten_val
+
+    # Cumulative deficit from past days (excluding today for goal calc)
+    cumulative_before_today = 0.0
+    for i, row in enumerate(rows[:-1]):
+        raw = row.get("raw_data") or {}
+        b = _burn_for_row(raw, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex)
+        e = _eaten_for_row(raw)
+        cumulative_before_today += b - e
+
+    deficit_needed_remaining = deficit_target_weekly - cumulative_before_today
+    days_remaining = 1.0  # today
+    daily_deficit_target = deficit_needed_remaining / days_remaining
+
+    # When behind (surplus so far), raise deficit target by recovery factor
+    if cumulative_before_today < 0:
+        daily_deficit_target *= 1.0 + surplus_recovery_factor
+
+    daily_goal = burn_today - daily_deficit_target
+    daily_goal = max(800.0, min(5000.0, daily_goal))  # sane bounds
+
+    progress_pct = weekly_deficit_progress(weekly_deficit, deficit_target_weekly)
+    status = calorie_status_from_progress(progress_pct)
+    return (daily_goal, eaten_today, weekly_deficit, progress_pct, status)
 
 
 def compute_weekly_deficit(

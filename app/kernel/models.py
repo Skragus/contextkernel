@@ -36,6 +36,7 @@ class Signal(BaseModel):
     status: str | None = None  # "red" | "yellow" | "green"
     trend: str | None = None  # "up" | "down" | "flat"
     coverage_vector: dict[str, float] | None = None  # For tracking consistency (Phase 1)
+    interpretation: str | None = None  # Plain-language summary for agents
 
 
 class EvidenceSource(BaseModel):
