@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import verify_api_key
+from app.config import settings
 from app.db import get_session
 
 router = APIRouter(prefix="/kernel", tags=["data"])
@@ -26,6 +27,7 @@ async def get_latest_data(
     hitting sh-apk-api query endpoints.
     """
     query_date = target_date or datetime.now(timezone.utc).date()
+    now = datetime.now(timezone.utc)
     
     sql = (
         "SELECT device_id, date, collected_at, received_at, raw_data "
@@ -46,10 +48,51 @@ async def get_latest_data(
     columns = result.keys()
     data = dict(zip(columns, row))
     
+    # Calculate freshness/completeness
+    collected_at = data["collected_at"]
+    hours_since_sync = (now - collected_at).total_seconds() / 3600
+    
+    # Day progress based on configured timezone
+    tz = __import__('zoneinfo').ZoneInfo(settings.default_tz)
+    local_now = now.astimezone(tz)
+    day_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_progress = (local_now - day_start).total_seconds() / 86400
+    
+    # Data freshness classification
+    if hours_since_sync < 1:
+        freshness = "current"
+    elif hours_since_sync < 4:
+        freshness = "recent"
+    elif hours_since_sync < 12:
+        freshness = "stale"
+    else:
+        freshness = "very_stale"
+    
+    # Completeness heuristic
+    if day_progress < 0.25:  # Before 6am
+        completeness = "early_day"
+    elif day_progress < 0.5:  # Before noon
+        completeness = "morning_partial"
+    elif day_progress < 0.75:  # Before 6pm
+        completeness = "afternoon_partial"
+    elif hours_since_sync > 6:  # Evening, no recent sync
+        completeness = "day_mostly_complete"
+    else:
+        completeness = "evening_ongoing"
+    
     return {
+        "meta": {
+            "query_date": query_date.isoformat(),
+            "queried_at": now.isoformat(),
+            "timezone": settings.default_tz,
+            "last_sync": collected_at.isoformat() if collected_at else None,
+            "hours_since_sync": round(hours_since_sync, 2),
+            "percent_day_elapsed": round(day_progress * 100, 1),
+            "data_freshness": freshness,
+            "completeness": completeness,
+            "next_expected_sync": (collected_at + timedelta(hours=1)).isoformat() if collected_at else None,
+        },
         "date": data["date"].isoformat() if data["date"] else None,
-        "collected_at": data["collected_at"].isoformat() if data["collected_at"] else None,
-        "received_at": data["received_at"].isoformat() if data["received_at"] else None,
         "device_id": data["device_id"],
         "data": data["raw_data"],
     }
@@ -64,6 +107,7 @@ async def get_signal_history(
 ) -> dict:
     """Return historical values for a specific signal from intraday logs."""
     cutoff = datetime.now(timezone.utc).date() - timedelta(days=days)
+    now = datetime.now(timezone.utc)
     
     sql = (
         "SELECT date, collected_at, raw_data "
@@ -97,9 +141,12 @@ async def get_signal_history(
             })
     
     return {
-        "signal": signal,
-        "days": days,
-        "count": len(history),
+        "meta": {
+            "queried_at": now.isoformat(),
+            "signal": signal,
+            "days_requested": days,
+            "days_returned": len(history),
+        },
         "history": history,
     }
 

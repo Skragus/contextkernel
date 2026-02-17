@@ -2,10 +2,12 @@ from fastapi import FastAPI
 
 from app.kernel.router import router as kernel_router
 from app.kernel.data_router import router as data_router
+from app.kernel.signals_router import router as signals_router
 
 app = FastAPI(title="ContextKernel", version="0.1.0")
 app.include_router(kernel_router)
 app.include_router(data_router)
+app.include_router(signals_router)
 
 
 @app.get("/")
@@ -21,6 +23,7 @@ async def root() -> dict:
             "cards": "/kernel/cards/{type}",
             "goals": "/kernel/goals",
             "goals_progress": "/kernel/goals/progress",
+            "signals": "/kernel/signals",
             "data_latest": "/kernel/data/latest",
             "data_history": "/kernel/data/history",
         },
