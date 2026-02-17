@@ -364,6 +364,20 @@ def _activity_kcal_from_steps(steps: float, steps_to_kcal: float, activity_modif
     return max(0.0, steps * steps_to_kcal * activity_modifier)
 
 
+def _bmr_from_window(
+    rows: list[dict],
+    age_years: int | None,
+    sex: str | None,
+) -> float:
+    """Use one BMR for the whole window: prefer most recent row with weight/height or bmr_kcal."""
+    for row in reversed(rows):  # last (most recent) first
+        raw = row.get("raw_data") or {}
+        bmr = _bmr_from_row(raw, age_years, sex)
+        if bmr is not None and bmr > 0:
+            return bmr
+    return 1500.0  # fallback only if no row has body data
+
+
 def compute_weekly_deficit_from_rows(
     rows: list[dict],
     tdee_activity_factor: float,
@@ -378,12 +392,13 @@ def compute_weekly_deficit_from_rows(
            daily burn = TDEE + (steps * steps_to_kcal * activity_modifier)
            deficit = burn - eaten
 
-    Never uses total_calories_burned. BMR from body_metrics or Mifflin-St Jeor.
+    Never uses total_calories_burned. Uses one BMR for whole window (from most recent row with body data).
     """
+    window_bmr = _bmr_from_window(rows, age_years, sex)
     total = 0.0
     for row in rows:
         raw = row.get("raw_data") or {}
-        burned = _burn_for_row(raw, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex)
+        burned = _burn_for_row(raw, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex, bmr_override=window_bmr)
         eaten = _eaten_for_row(raw)
         total += burned - eaten
     return total
@@ -396,9 +411,10 @@ def _burn_for_row(
     activity_modifier: float,
     age_years: int | None,
     sex: str | None,
+    bmr_override: float | None = None,
 ) -> float:
-    """Single-day burn = TDEE + activity. Never uses total_calories_burned."""
-    bmr = _bmr_from_row(raw, age_years, sex)
+    """Single-day burn = TDEE + activity. Never uses total_calories_burned. Use bmr_override for whole-window BMR."""
+    bmr = bmr_override if bmr_override is not None and bmr_override > 0 else _bmr_from_row(raw, age_years, sex)
     if bmr is None or bmr <= 0:
         bmr = 1500.0
     tdee = bmr * tdee_activity_factor
@@ -443,13 +459,14 @@ def compute_daily_calorie_goal_from_rows(
     if not rows:
         return (2000.0, None, 0.0, 0.0, "red")  # fallback
 
+    window_bmr = _bmr_from_window(rows, age_years, sex)
     weekly_deficit = compute_weekly_deficit_from_rows(
         rows, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex
     )
 
     # Last row = "today" (or most recent)
     last_raw = rows[-1].get("raw_data") or {}
-    burn_today = _burn_for_row(last_raw, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex)
+    burn_today = _burn_for_row(last_raw, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex, bmr_override=window_bmr)
     eaten_today: float | None = None
     eaten_val = _eaten_for_row(last_raw)
     if eaten_val > 0:
@@ -457,9 +474,9 @@ def compute_daily_calorie_goal_from_rows(
 
     # Cumulative deficit from past days (excluding today for goal calc)
     cumulative_before_today = 0.0
-    for i, row in enumerate(rows[:-1]):
+    for row in rows[:-1]:
         raw = row.get("raw_data") or {}
-        b = _burn_for_row(raw, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex)
+        b = _burn_for_row(raw, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex, bmr_override=window_bmr)
         e = _eaten_for_row(raw)
         cumulative_before_today += b - e
 
@@ -472,7 +489,7 @@ def compute_daily_calorie_goal_from_rows(
         daily_deficit_target *= 1.0 + surplus_recovery_factor
 
     daily_goal = burn_today - daily_deficit_target
-    daily_goal = max(800.0, min(5000.0, daily_goal))  # sane bounds
+    daily_goal = max(1800.0, min(5000.0, daily_goal))  # floor for larger build (e.g. 130kg)
 
     progress_pct = weekly_deficit_progress(weekly_deficit, deficit_target_weekly)
     status = calorie_status_from_progress(progress_pct)

@@ -6,11 +6,11 @@ class Settings(BaseSettings):
     default_tz: str = "UTC"
     kernel_api_key: str | None = None
 
-    # Optional user profile / goals tuning (single-user, env-backed, not yet integrated)
-    user_age: int | None = None
-    user_height_cm: float | None = None
-    user_sex: str | None = None  # "male" | "female" | other
-    user_activity_level: str | None = None  # "sedentary" | "light" | "moderate" | "active" | "very_active"
+    # Default user profile (BMR/TDEE when DB has no body_metrics). Override via env.
+    user_age: int | None = 27
+    user_height_cm: float | None = 193.0
+    user_sex: str | None = "male"  # "male" | "female"
+    user_activity_level: str | None = "sedentary"  # TDEE uses goals_tdee_activity_factor (1.2 = sedentary)
 
     # Phase 1: Tracking consistency config
     goals_tracking_recent_days: int = 7  # Recent reliability window
