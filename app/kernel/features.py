@@ -449,10 +449,14 @@ def compute_daily_calorie_goal_from_rows(
     age_years: int | None = None,
     sex: str | None = None,
 ) -> tuple[float, float | None, float, float, str]:
-    """Compute daily calorie goal from rolling 7-day window.
+    """Daily calorie goal: TDEE - 500 + (steps buffer for today only). No activity carryover.
 
-    Daily goal = burn_today - (deficit_needed_remaining / days_remaining).
-    When behind (surplus so far), deficit for remaining days increases by surplus_recovery_factor (e.g. 5%).
+    - Base: goal = TDEE - 500 + activity_today (steps that day only = buffer for that day).
+    - When behind for the week (surplus so far): goal tightens so you catch up (more deficit today).
+    - total_calories_burned is never used; TDEE = BMR × tdee_activity_factor.
+
+    Missing data: no rows → (2000, None, 0, 0, red). No BMR in window → 1500 fallback. Missing
+    steps/eaten → 0. Missing raw_data → {}. All paths return valid numbers; goal clamped to [1800, 5000].
 
     Returns: (daily_goal_kcal, eaten_today_or_none, weekly_deficit_actual, progress_pct, status)
     """
@@ -460,19 +464,34 @@ def compute_daily_calorie_goal_from_rows(
         return (2000.0, None, 0.0, 0.0, "red")  # fallback
 
     window_bmr = _bmr_from_window(rows, age_years, sex)
-    weekly_deficit = compute_weekly_deficit_from_rows(
-        rows, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex
-    )
+    tdee = window_bmr * tdee_activity_factor  # same for whole window
+    deficit_per_day = deficit_target_weekly / 7.0  # 500
 
-    # Last row = "today" (or most recent)
+    # Today only: steps buffer (no carryover to other days)
+    # burn_today = estimated kcal expended today (TDEE + steps buffer); used when behind to set goal = burn - catchup_deficit
     last_raw = rows[-1].get("raw_data") or {}
-    burn_today = _burn_for_row(last_raw, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex, bmr_override=window_bmr)
+    steps_today = 0.0
+    if "steps_total" in last_raw and last_raw["steps_total"] is not None:
+        try:
+            steps_today = float(last_raw["steps_total"])
+        except (TypeError, ValueError):
+            pass
+    activity_today = _activity_kcal_from_steps(steps_today, steps_to_kcal, activity_modifier)
+    burn_today = tdee + activity_today
+
     eaten_today: float | None = None
     eaten_val = _eaten_for_row(last_raw)
     if eaten_val > 0:
         eaten_today = eaten_val
 
-    # Cumulative deficit from past days (excluding today for goal calc)
+    weekly_deficit = compute_weekly_deficit_from_rows(
+        rows, tdee_activity_factor, steps_to_kcal, activity_modifier, age_years, sex
+    )
+
+    # Base daily goal: TDEE - 500 + today's steps buffer (activity does not carry over)
+    baseline_daily_goal = tdee - deficit_per_day + activity_today
+
+    # Cumulative deficit from past days (excluding today)
     cumulative_before_today = 0.0
     for row in rows[:-1]:
         raw = row.get("raw_data") or {}
@@ -481,15 +500,18 @@ def compute_daily_calorie_goal_from_rows(
         cumulative_before_today += b - e
 
     deficit_needed_remaining = deficit_target_weekly - cumulative_before_today
-    days_remaining = 1.0  # today
-    daily_deficit_target = deficit_needed_remaining / days_remaining
+    days_to_spread = 6  # spread catch-up over remaining days in week
 
-    # When behind (surplus so far), raise deficit target by recovery factor
-    if cumulative_before_today < 0:
-        daily_deficit_target *= 1.0 + surplus_recovery_factor
+    if cumulative_before_today >= deficit_target_weekly:
+        # On track or ahead: goal = TDEE - 500 + today's buffer only
+        daily_goal = baseline_daily_goal
+    else:
+        # Behind: same base goal, minus your share of the catch-up (spread over 6 days)
+        # daily_goal = (TDEE - 500 + activity_today) - (deficit_needed_remaining / 6)
+        catchup_per_day = deficit_needed_remaining / days_to_spread
+        daily_goal = baseline_daily_goal - catchup_per_day
 
-    daily_goal = burn_today - daily_deficit_target
-    daily_goal = max(1800.0, min(5000.0, daily_goal))  # floor for larger build (e.g. 130kg)
+    daily_goal = max(1800.0, min(5000.0, daily_goal))
 
     progress_pct = weekly_deficit_progress(weekly_deficit, deficit_target_weekly)
     status = calorie_status_from_progress(progress_pct)
