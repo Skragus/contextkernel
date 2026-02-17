@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     goals_calories_burned_modifier: float = 0.5  # Multiplier for total_calories_burned
 
     # Phase 3: Steps gated ramp config
-    goals_steps_floor: float = 4000.0  # Minimum acceptable 14d avg
+    goals_steps_floor: float = 3500.0  # Minimum acceptable 14d avg
     goals_steps_long_term_target: float = 8000.0  # Ultimate goal
     goals_steps_ramp_rate_fast: float = 0.075  # 7.5% per week when conditions good
     goals_steps_ramp_rate_slow: float = 0.025  # 2.5% per week when conditions moderate
