@@ -196,7 +196,7 @@ async def _build_card(
             status = features.steps_status_from_avg(current_14d, dynamic_target, floor)
             priority = goal.priority
             target = dynamic_target
-            value_for_signal = round(current_14d, 1)
+            value_for_signal = current_val if current_val is not None else 0.0
             progress_pct = min(100.0, (current_14d / dynamic_target) * 100.0) if dynamic_target > 0 else 0.0
             trend = features.compute_trend(tg_steps, bl_steps)
             signals.append(
